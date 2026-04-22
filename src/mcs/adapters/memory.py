@@ -137,7 +137,10 @@ def capture(
         path = base.with_name(f"{base.name}-{counter}").with_suffix(".md")
         counter += 1
 
+    # 파일명과 frontmatter id 정합성 보장
+    meta["id"] = path.stem
+
     post = frontmatter.Post(text.rstrip() + "\n", **meta)
     path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
 
-    return CaptureResult(path=path, id=slug, type=meta["type"], domain=domain)
+    return CaptureResult(path=path, id=meta["id"], type=meta["type"], domain=domain)

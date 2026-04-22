@@ -5,6 +5,7 @@ import typer
 from rich.console import Console
 
 from mcs.adapters.memory import DOMAINS, capture as core_capture
+from mcs.config import load_settings
 
 console = Console()
 
@@ -54,4 +55,9 @@ def capture_cmd(
         f"[green]✓[/green] [bold]{kind}[/bold] · "
         f"[dim]{result.id}[/dim]"
     )
-    console.print(f"  [cyan]{result.path.relative_to(result.path.parent.parent.parent)}[/cyan]")
+    root = load_settings().repo_root.resolve()
+    try:
+        display = result.path.resolve().relative_to(root)
+    except ValueError:
+        display = result.path
+    console.print(f"  [cyan]{display}[/cyan]")
