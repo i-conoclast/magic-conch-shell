@@ -27,6 +27,17 @@ from mcs.adapters.memory import (
     capture_structured as core_capture_structured,
     load_memo,
 )
+from mcs.adapters.okr import (
+    OKRError,
+    OKRNotFound,
+    create_kr as core_okr_create_kr,
+    create_objective as core_okr_create_objective,
+    get as core_okr_get,
+    get_kr as core_okr_get_kr,
+    list_active as core_okr_list_active,
+    update_kr as core_okr_update_kr,
+    update_objective as core_okr_update_objective,
+)
 from mcs.adapters.search import search as core_search, sync_file
 from mcs.adapters.templates import TemplateError, list_templates, load_template
 from mcs.config import load_settings
@@ -112,6 +123,124 @@ async def memory_capture(
         "domain": result.domain,
         "indexed": indexed,
     }
+
+
+# ─── OKR tools ──────────────────────────────────────────────────────────
+
+@mcp.tool(
+    name="okr.list_active",
+    description="List active+achieved Objectives (optionally filtered to one quarter).",
+)
+async def okr_list_active(quarter: str | None = None) -> list[dict[str, Any]]:
+    """Returns [{id, quarter, domain, status, confidence, krs: [...]}]."""
+    return [o.to_dict() for o in core_okr_list_active(quarter)]
+
+
+@mcp.tool(
+    name="okr.get",
+    description="Load one Objective (with its KRs) by id.",
+)
+async def okr_get(objective_id: str) -> dict[str, Any]:
+    try:
+        return core_okr_get(objective_id).to_dict()
+    except OKRNotFound as e:
+        return {"error": str(e)}
+
+
+@mcp.tool(
+    name="okr.get_kr",
+    description="Load a single KR by id (e.g. '2026-Q2-career-mle-role.kr-1').",
+)
+async def okr_get_kr(kr_id: str) -> dict[str, Any]:
+    try:
+        return core_okr_get_kr(kr_id).to_dict()
+    except (OKRNotFound, OKRError) as e:
+        return {"error": str(e)}
+
+
+@mcp.tool(
+    name="okr.create_objective",
+    description="Create a new Objective folder with _objective.md.",
+)
+async def okr_create_objective(
+    slug: str,
+    quarter: str,
+    domain: str,
+    confidence: float = 0.5,
+    entities: list[str] | None = None,
+    body: str = "",
+) -> dict[str, Any]:
+    try:
+        obj = core_okr_create_objective(
+            slug=slug,
+            quarter=quarter,
+            domain=domain,
+            confidence=confidence,
+            entities=entities,
+            body=body,
+        )
+    except OKRError as e:
+        return {"error": str(e)}
+    return obj.to_dict()
+
+
+@mcp.tool(
+    name="okr.create_kr",
+    description="Add a KR to an existing Objective.",
+)
+async def okr_create_kr(
+    parent_id: str,
+    text: str,
+    target: float = 1.0,
+    current: float = 0.0,
+    unit: str = "count",
+    status: str = "pending",
+    due: str | None = None,
+    body: str = "",
+) -> dict[str, Any]:
+    try:
+        kr = core_okr_create_kr(
+            parent_id,
+            text=text,
+            target=target,
+            current=current,
+            unit=unit,
+            status=status,
+            due=due,
+            body=body,
+        )
+    except (OKRError, OKRNotFound) as e:
+        return {"error": str(e)}
+    return kr.to_dict()
+
+
+@mcp.tool(
+    name="okr.update_kr",
+    description=(
+        "Patch KR fields (text/target/current/unit/status/due/body)"
+        " and re-stamp updated_at."
+    ),
+)
+async def okr_update_kr(kr_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+    try:
+        kr = core_okr_update_kr(kr_id, **fields)
+    except (OKRError, OKRNotFound) as e:
+        return {"error": str(e)}
+    return kr.to_dict()
+
+
+@mcp.tool(
+    name="okr.update_objective",
+    description="Patch Objective-level fields (status/confidence/domain/entities/body).",
+)
+async def okr_update_objective(
+    objective_id: str, fields: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        obj = core_okr_update_objective(objective_id, **fields)
+    except (OKRError, OKRNotFound) as e:
+        return {"error": str(e)}
+    return obj.to_dict()
 
 
 @mcp.tool(
