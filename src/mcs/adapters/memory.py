@@ -84,6 +84,71 @@ def _target_folder(brain: Path, domain: str | None) -> Path:
     return brain / "signals"
 
 
+def _infer_type_and_domain(brain: Path, path: Path) -> tuple[str, str | None]:
+    """Derive (type, domain) from a file's location under brain/.
+
+    brain/signals/X.md       → ("signal", None)
+    brain/domains/Y/X.md     → ("note", "Y")
+    anything else            → ("", None)  — caller decides what to do
+    """
+    try:
+        rel = path.resolve().relative_to(brain.resolve())
+    except ValueError:
+        return "", None
+    parts = rel.parts
+    if len(parts) >= 1 and parts[0] == "signals":
+        return "signal", None
+    if len(parts) >= 3 and parts[0] == "domains":
+        dom = parts[1]
+        if dom in DOMAINS:
+            return "note", dom
+    return "", None
+
+
+def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
+    """Fill in missing frontmatter fields on an existing brain/ markdown file.
+
+    Writes the file in-place when any required field is missing. Idempotent:
+    returns False if the file already has every required field.
+
+    Required fields: id, type, domain, entities, created_at, source.
+    """
+    settings = load_settings()
+    brain = settings.brain_dir.resolve()
+    path = path.resolve()
+
+    inferred_type, inferred_domain = _infer_type_and_domain(brain, path)
+    if not inferred_type:
+        # Not under signals/ or domains/X/ — outside our supplementation scope.
+        return False
+
+    try:
+        post = frontmatter.load(path)
+    except Exception:
+        # Malformed frontmatter — rewrite from scratch below.
+        post = frontmatter.Post(path.read_text(encoding="utf-8"))
+
+    meta = dict(post.metadata or {})
+    required = ("id", "type", "domain", "entities", "created_at", "source")
+    if all(k in meta for k in required):
+        return False
+
+    meta.setdefault("id", path.stem)
+    meta.setdefault("type", inferred_type)
+    # domain may legitimately be None for signals; setdefault is fine.
+    if "domain" not in meta:
+        meta["domain"] = inferred_domain
+    meta.setdefault("entities", [])
+    if "created_at" not in meta:
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=KST)
+        meta["created_at"] = mtime.isoformat()
+    meta.setdefault("source", source)
+
+    new_post = frontmatter.Post(post.content, **meta)
+    path.write_text(frontmatter.dumps(new_post) + "\n", encoding="utf-8")
+    return True
+
+
 def capture(
     text: str,
     domain: str | None = None,

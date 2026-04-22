@@ -1,4 +1,4 @@
-"""Unit tests for mcs.adapters.memory.capture()."""
+"""Unit tests for mcs.adapters.memory.capture() and supplement_frontmatter()."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from mcs.adapters.memory import capture
+from mcs.adapters.memory import capture, supplement_frontmatter
 
 
 def _read_meta(path: Path) -> dict:
@@ -94,3 +94,73 @@ def test_source_field_defaults_to_typed(tmp_brain: Path) -> None:
 def test_source_field_override(tmp_brain: Path) -> None:
     result = capture(text="...", source="file-watcher")
     assert _read_meta(result.path)["source"] == "file-watcher"
+
+
+# ─── supplement_frontmatter ─────────────────────────────────────────────
+
+def test_supplement_fills_missing_fields_for_signal(tmp_brain: Path) -> None:
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "2026-04-22-raw.md"
+    path.write_text("bare body, no yaml\n", encoding="utf-8")
+
+    changed = supplement_frontmatter(path)
+    assert changed is True
+
+    meta = _read_meta(path)
+    assert meta["id"] == "2026-04-22-raw"
+    assert meta["type"] == "signal"
+    assert meta["domain"] is None
+    assert meta["entities"] == []
+    assert meta["source"] == "file-watcher"
+    assert "created_at" in meta
+
+
+def test_supplement_infers_note_from_domain_path(tmp_brain: Path) -> None:
+    (tmp_brain / "domains" / "career").mkdir(parents=True)
+    path = tmp_brain / "domains" / "career" / "2026-04-22-foo.md"
+    path.write_text("career memo\n", encoding="utf-8")
+
+    supplement_frontmatter(path)
+    meta = _read_meta(path)
+    assert meta["type"] == "note"
+    assert meta["domain"] == "career"
+
+
+def test_supplement_is_idempotent(tmp_brain: Path) -> None:
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "x.md"
+    path.write_text("---\nid: x\ntype: signal\ndomain: null\nentities: []\ncreated_at: '2026-04-22T00:00:00+09:00'\nsource: typed\n---\n\nbody\n", encoding="utf-8")
+
+    # All required fields present → no rewrite
+    assert supplement_frontmatter(path) is False
+
+
+def test_supplement_preserves_existing_fields(tmp_brain: Path) -> None:
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "x.md"
+    # source field missing, but id/type/domain/entities/created_at exist
+    path.write_text(
+        "---\nid: x\ntype: signal\ndomain: null\nentities: [a]\ncreated_at: '2026-04-22T00:00:00+09:00'\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    assert supplement_frontmatter(path) is True
+    meta = _read_meta(path)
+    assert meta["entities"] == ["a"]           # preserved
+    assert meta["id"] == "x"                    # preserved
+    assert meta["source"] == "file-watcher"     # filled
+
+
+def test_supplement_ignores_paths_outside_scope(tmp_brain: Path) -> None:
+    # brain/daily/ is not in watcher scope — supplement should refuse.
+    (tmp_brain / "daily").mkdir()
+    path = tmp_brain / "daily" / "foo.md"
+    path.write_text("naked\n", encoding="utf-8")
+    assert supplement_frontmatter(path) is False
+
+
+def test_supplement_rejects_unknown_domain(tmp_brain: Path) -> None:
+    (tmp_brain / "domains" / "bogus").mkdir(parents=True)
+    path = tmp_brain / "domains" / "bogus" / "x.md"
+    path.write_text("body\n", encoding="utf-8")
+    # Not a whitelisted domain → skip supplementing.
+    assert supplement_frontmatter(path) is False
