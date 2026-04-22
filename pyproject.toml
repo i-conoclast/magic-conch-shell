@@ -52,3 +52,10 @@ line-length = 100
 [tool.mypy]
 python_version = "3.13"
 strict_optional = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+filterwarnings = [
+  "ignore::DeprecationWarning:milvus_lite",
+]
