@@ -6,7 +6,14 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from mcs.adapters.memory import capture, supplement_frontmatter
+from mcs.adapters.memory import (
+    MemoAmbiguous,
+    MemoNotFound,
+    capture,
+    load_memo,
+    resolve_memo,
+    supplement_frontmatter,
+)
 
 
 def _read_meta(path: Path) -> dict:
@@ -164,3 +171,67 @@ def test_supplement_rejects_unknown_domain(tmp_brain: Path) -> None:
     path.write_text("body\n", encoding="utf-8")
     # Not a whitelisted domain → skip supplementing.
     assert supplement_frontmatter(path) is False
+
+
+# ─── resolve_memo / load_memo ───────────────────────────────────────────
+
+def test_resolve_bare_slug_in_signals(tmp_brain: Path) -> None:
+    r = capture(text="hello", title="demo-slug")
+    resolved = resolve_memo(r.path.stem)
+    assert resolved == r.path.resolve()
+
+
+def test_resolve_bare_slug_in_domain(tmp_brain: Path) -> None:
+    r = capture(text="note", domain="career", title="demo-slug")
+    resolved = resolve_memo(r.path.stem)
+    assert resolved == r.path.resolve()
+
+
+def test_resolve_relative_path(tmp_brain: Path) -> None:
+    r = capture(text="x", title="path-form")
+    rel = f"signals/{r.path.stem}"
+    assert resolve_memo(rel) == r.path.resolve()
+
+
+def test_resolve_path_with_md_suffix(tmp_brain: Path) -> None:
+    r = capture(text="x", title="path-form-md")
+    rel = f"signals/{r.path.stem}.md"
+    assert resolve_memo(rel) == r.path.resolve()
+
+
+def test_resolve_path_with_brain_prefix(tmp_brain: Path) -> None:
+    r = capture(text="x", title="brain-prefix")
+    rel = f"brain/signals/{r.path.stem}.md"
+    assert resolve_memo(rel) == r.path.resolve()
+
+
+def test_resolve_not_found_raises(tmp_brain: Path) -> None:
+    with pytest.raises(MemoNotFound):
+        resolve_memo("2026-99-99-no-such-memo")
+
+
+def test_resolve_ambiguous_raises_with_candidates(tmp_brain: Path) -> None:
+    # Same slug in two locations.
+    a = capture(text="in signals", title="dupe")
+    b = capture(text="in career", domain="career", title="dupe")
+    with pytest.raises(MemoAmbiguous) as info:
+        resolve_memo("2026-04-22-dupe")  # the title-based slug
+    assert len(info.value.candidates) == 2
+    assert a.path in [p.resolve() for p in info.value.candidates]
+    assert b.path in [p.resolve() for p in info.value.candidates]
+
+
+def test_load_memo_parses_frontmatter_and_body(tmp_brain: Path) -> None:
+    r = capture(
+        text="body line 1\nbody line 2",
+        domain="career",
+        entities=["people/jane-smith"],
+        title="full-load",
+    )
+    memo = load_memo(r.path.stem)
+    assert memo.id == r.path.stem
+    assert memo.type == "note"
+    assert memo.domain == "career"
+    assert memo.entities == ["people/jane-smith"]
+    assert "body line 1" in memo.body
+    assert memo.source == "typed"

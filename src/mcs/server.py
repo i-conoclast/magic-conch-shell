@@ -18,7 +18,13 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from mcs.adapters.memory import DOMAINS, capture as core_capture
+from mcs.adapters.memory import (
+    DOMAINS,
+    MemoAmbiguous,
+    MemoNotFound,
+    capture as core_capture,
+    load_memo,
+)
 from mcs.adapters.search import search as core_search, sync_file
 from mcs.config import load_settings
 
@@ -102,6 +108,44 @@ async def memory_capture(
         "type": result.type,
         "domain": result.domain,
         "indexed": indexed,
+    }
+
+
+@mcp.tool(
+    name="memory.show",
+    description="Read a brain/ memo by id or relative path. Returns frontmatter + body.",
+)
+async def memory_show(query: str) -> dict[str, Any]:
+    """Locate and return a memo.
+
+    `query` can be:
+      - Bare slug ('2026-04-22-foo')
+      - Relative path under brain/ ('signals/2026-04-22-foo' or '.md' optional)
+
+    Returns {found, id, type, domain, entities, created_at, source, rel_path, body}
+    or {found: False, reason, candidates?} if ambiguous / missing.
+    """
+    try:
+        memo = load_memo(query)
+    except MemoNotFound as e:
+        return {"found": False, "reason": str(e), "candidates": []}
+    except MemoAmbiguous as e:
+        return {
+            "found": False,
+            "reason": str(e),
+            "candidates": [str(p) for p in e.candidates],
+        }
+    return {
+        "found": True,
+        "id": memo.id,
+        "type": memo.type,
+        "domain": memo.domain,
+        "entities": memo.entities,
+        "created_at": memo.created_at,
+        "source": memo.source,
+        "rel_path": memo.rel_path,
+        "path": str(memo.path),
+        "body": memo.body,
     }
 
 

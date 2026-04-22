@@ -84,6 +84,110 @@ def _target_folder(brain: Path, domain: str | None) -> Path:
     return brain / "signals"
 
 
+@dataclass
+class ResolvedMemo:
+    """A brain/ file located by id or path, with parsed frontmatter."""
+
+    path: Path
+    rel_path: str
+    id: str
+    type: str
+    domain: str | None
+    entities: list[str]
+    created_at: str | None
+    source: str | None
+    body: str
+
+
+class MemoNotFound(LookupError):
+    """Raised when no brain/ file matches a lookup query."""
+
+
+class MemoAmbiguous(LookupError):
+    """Raised when a slug matches multiple files (e.g. same slug in different folders)."""
+
+    def __init__(self, query: str, candidates: list[Path]) -> None:
+        super().__init__(
+            f"{query!r} matches {len(candidates)} files — disambiguate with a path prefix."
+        )
+        self.candidates = candidates
+
+
+def _scan_brain(brain: Path) -> list[Path]:
+    """Yield all brain/*.md under the scoped roots (signals + domains)."""
+    out: list[Path] = []
+    for sub in ("signals", "domains", "daily", "entities", "plans"):
+        root = brain / sub
+        if not root.exists():
+            continue
+        out.extend(root.rglob("*.md"))
+    return out
+
+
+def resolve_memo(query: str) -> Path:
+    """Find the brain/ file for `query`.
+
+    Accepts:
+      - Bare slug (`2026-04-22-foo`) — matched against file stems.
+      - Relative path under brain/ (`signals/2026-04-22-foo.md` or no .md).
+      - Absolute path (only if inside brain/).
+
+    Raises:
+      MemoNotFound  — nothing matches.
+      MemoAmbiguous — multiple files share the slug (rare: collision across folders).
+    """
+    settings = load_settings()
+    brain = settings.brain_dir.resolve()
+    q = query.strip()
+    if q.startswith("brain/"):
+        q = q[len("brain/"):]
+    if q.endswith(".md"):
+        q = q[:-3]
+
+    # Path-like? (contains slash)
+    if "/" in q:
+        candidate = (brain / q).with_suffix(".md")
+        if candidate.exists():
+            return candidate.resolve()
+        raise MemoNotFound(f"no file at brain/{q}.md")
+
+    # Bare slug — scan for stem matches.
+    matches = [p for p in _scan_brain(brain) if p.stem == q]
+    if not matches:
+        raise MemoNotFound(f"no brain file with id {q!r}")
+    if len(matches) > 1:
+        raise MemoAmbiguous(q, sorted(matches))
+    return matches[0].resolve()
+
+
+def load_memo(query: str) -> ResolvedMemo:
+    """Resolve + parse a brain file by id or path."""
+    path = resolve_memo(query)
+    settings = load_settings()
+    brain = settings.brain_dir.resolve()
+
+    post = frontmatter.load(path)
+    meta = post.metadata or {}
+    inferred_type, inferred_domain = _infer_type_and_domain(brain, path)
+
+    try:
+        rel = str(path.relative_to(settings.repo_root.resolve()))
+    except ValueError:
+        rel = str(path)
+
+    return ResolvedMemo(
+        path=path,
+        rel_path=rel,
+        id=str(meta.get("id") or path.stem),
+        type=str(meta.get("type") or inferred_type),
+        domain=meta.get("domain") if meta.get("domain") is not None else inferred_domain,
+        entities=list(meta.get("entities") or []),
+        created_at=(str(meta["created_at"]) if "created_at" in meta else None),
+        source=(str(meta["source"]) if "source" in meta else None),
+        body=(post.content or "").strip(),
+    )
+
+
 def _infer_type_and_domain(brain: Path, path: Path) -> tuple[str, str | None]:
     """Derive (type, domain) from a file's location under brain/.
 
