@@ -748,7 +748,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "httpx" },
-    { name = "memsearch" },
+    { name = "memsearch", extra = ["ollama"] },
     { name = "notion-client" },
     { name = "oauth-codex" },
     { name = "ollama" },
@@ -773,7 +773,7 @@ dev = [
 requires-dist = [
     { name = "fastmcp", specifier = ">=3" },
     { name = "httpx", specifier = ">=0.28" },
-    { name = "memsearch", specifier = ">=0.3" },
+    { name = "memsearch", extras = ["ollama"], specifier = ">=0.3" },
     { name = "notion-client", specifier = ">=3" },
     { name = "oauth-codex", specifier = ">=4" },
     { name = "ollama", specifier = ">=0.6" },
@@ -858,12 +858,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/56/0c/d4e5c954f89686eaa38aececf8fc6ab43498801671ee189e058c2ac410b3/memsearch-0.3.1-py3-none-any.whl", hash = "sha256:a40fc8151c2da1460baa332de9dffbe5486eb0cd4c229662ef0a38c58980c2c4", size = 49906, upload-time = "2026-04-16T10:18:31.854Z" },
 ]
 
+[package.optional-dependencies]
+ollama = [
+    { name = "ollama" },
+]
+
 [[package]]
 name = "milvus-lite"
 version = "2.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "tqdm" },
+    { name = "tqdm", marker = "sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a9/b2/acc5024c8e8b6a0b034670b8e8af306ebd633ede777dcbf557eac4785937/milvus_lite-2.5.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:6b014453200ba977be37ba660cb2d021030375fa6a35bc53c2e1d92980a0c512", size = 27934713, upload-time = "2025-06-30T04:23:37.028Z" },
@@ -1654,8 +1659,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [

@@ -8,27 +8,21 @@ dependencies = [
   # CLI & UX
   "typer[all]>=0.24",
   "rich>=15",
-
   # File·데이터
   "watchdog>=6",
   "pydantic>=2.13",
   "pyyaml>=6",
   "python-frontmatter>=1.1",
-
   # HTTP·외부 API
   "httpx>=0.28",
   "notion-client>=3",
-
   # LLM
   "ollama>=0.6",           # 로컬 LLM 클라이언트
   "oauth-codex>=4",        # Codex OAuth (GPT-5.4)
-
   # MCP
   "fastmcp>=3",            # MCP 서버 프레임워크
-
   # Memory engine (Day 2 검증 후 최종 확정)
-  "memsearch>=0.3",
-
+  "memsearch[ollama]>=0.3",
   # Time
   "tzdata>=2026.1",
 ]
