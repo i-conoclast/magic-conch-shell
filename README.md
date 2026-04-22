@@ -15,29 +15,20 @@
 
 ---
 
-## 현재 Phase
-
-**Requirements 정의 중**
-
-이 프로젝트는 구현에 앞서 **요구사항 → 기능 → 설계 → 구현** 순서로 문서화된다.
-현재는 요구사항과 기능 목록까지 작성된 상태. 기술 선택·설계는 그 다음 단계.
-
----
-
-## 디렉토리 안내
-
-| 경로 | 내용 |
-|---|---|
-| [`docs/requirements/`](docs/requirements/) | 요구사항 정의서 (기술 무관) |
-| [`docs/features/`](docs/features/) | 기능 목록 + 우선순위 + 추적표 |
-| [`docs/archive/`](docs/archive/) | 이전 설계 초안 (폐기됨) |
-
-**시작점**: [`docs/requirements/00-overview.md`](docs/requirements/00-overview.md) — 1 페이지 요약.
-
----
-
 ## 핵심 원칙
 
-- **기술 무관 요구사항**: requirements/ 와 features/ 에는 구체 제품·라이브러리 이름이 등장하지 않음
 - **사용자 outcome 중심**: 성공 기준은 시스템 체크가 아닌 사용자 변화
 - **침입성 낮게**: 잔소리·누락 감지 금지. 능동 개입은 스케줄 + 외부 시그널만
+- **마크다운 SSoT**: 모든 user data는 `brain/` 하위 평문 마크다운. 캐시는 언제든 재빌드.
+
+---
+
+## Identity 파일
+
+프로젝트 루트의 3개 파일이 Hermes Agent 시스템 프롬프트로 자동 주입된다.
+
+| 파일 | 역할 |
+|---|---|
+| [`SOUL.md`](SOUL.md) | 인격·톤·금지사항·기본 행동 |
+| [`AGENTS.md`](AGENTS.md) | 프로젝트 규약·스킬 라우팅·경계·도구 허용 |
+| `USER.md` → `brain/USER.md` | 사용자 프로필 (학습 + 수동, symlink) |
