@@ -28,6 +28,15 @@ class Settings(BaseModel):
     notion_daily_tasks_db: str | None = None
     notion_calendar_db: str | None = None
 
+    # Daemon (MCP HTTP server that owns MemSearch + watcher)
+    daemon_host: str = Field(default="127.0.0.1")
+    daemon_port: int = Field(default=18342)
+
+    @property
+    def daemon_url(self) -> str:
+        """HTTP URL the MCP client uses to reach the daemon."""
+        return f"http://{self.daemon_host}:{self.daemon_port}/mcp/"
+
     @classmethod
     def load(cls) -> "Settings":
         """Load settings from env vars, falling back to defaults."""
@@ -41,6 +50,8 @@ class Settings(BaseModel):
             notion_token=os.environ.get("NOTION_TOKEN"),
             notion_daily_tasks_db=os.environ.get("NOTION_DAILY_TASKS_DB"),
             notion_calendar_db=os.environ.get("NOTION_CALENDAR_DB"),
+            daemon_host=os.environ.get("MCS_DAEMON_HOST", "127.0.0.1"),
+            daemon_port=int(os.environ.get("MCS_DAEMON_PORT", "18342")),
         )
 
 
