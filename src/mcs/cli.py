@@ -4,6 +4,8 @@ from __future__ import annotations
 import typer
 from rich.console import Console
 
+from mcs.commands.capture import capture_cmd
+
 app = typer.Typer(
     name="mcs",
     help="magic-conch-shell — personal life brain + agent",
@@ -25,6 +27,10 @@ def version() -> None:
 def hello() -> None:
     """Smoke test — the shell has spoken."""
     console.print("[bold]The shell has spoken.[/bold]")
+
+
+# Register: mcs capture ...
+app.command(name="capture", help="Capture a one-line memo to brain/.")(capture_cmd)
 
 
 def main() -> None:
