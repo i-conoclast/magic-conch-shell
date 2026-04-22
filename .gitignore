@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# User data (not committed)
+brain/*
+!brain/.gitkeep
+!brain/USER.md
+.brain/*
+!.brain/.gitkeep
+
+# Secrets
+.env
+.env.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+.cursor/
