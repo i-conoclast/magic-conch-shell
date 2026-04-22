@@ -5,6 +5,7 @@ import typer
 from rich.console import Console
 
 from mcs.commands.capture import capture_cmd
+from mcs.commands.daemon import app as daemon_app
 from mcs.commands.search import search_cmd
 
 app = typer.Typer(
@@ -33,6 +34,7 @@ def hello() -> None:
 # Register: mcs capture ...
 app.command(name="capture", help="Capture a one-line memo to brain/.")(capture_cmd)
 app.command(name="search", help="Hybrid search over brain/.")(search_cmd)
+app.add_typer(daemon_app, name="daemon")
 
 
 def main() -> None:
