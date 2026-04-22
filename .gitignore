@@ -12,6 +12,9 @@ brain/*
 .brain/*
 !.brain/.gitkeep
 
+# Personal planning & design docs (local only)
+docs/
+
 # Secrets
 .env
 .env.local
