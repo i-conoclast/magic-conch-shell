@@ -1,6 +1,8 @@
 """`mcs capture` command — one-line memo capture."""
 from __future__ import annotations
 
+import asyncio
+
 import typer
 from rich.console import Console
 
@@ -31,6 +33,11 @@ def capture_cmd(
         help="Readable slug title (else auto-timestamp).",
     ),
     silent: bool = typer.Option(False, "-s", "--silent", help="Suppress confirmation."),
+    no_index: bool = typer.Option(
+        False,
+        "--no-index",
+        help="Skip immediate embedding (picked up on next `mcs search`).",
+    ),
 ) -> None:
     """Capture a one-line memo to brain/."""
     try:
@@ -44,6 +51,15 @@ def capture_cmd(
     except ValueError as e:
         console.print(f"[red]✗[/red] {e}")
         raise typer.Exit(code=2) from e
+
+    index_warning: str | None = None
+    if not no_index:
+        try:
+            from mcs.adapters.search import sync_file
+            asyncio.run(sync_file(result.path))
+        except Exception as e:
+            # capture itself succeeded — degrade gracefully on embedding failure.
+            index_warning = f"indexing skipped: {e}"
 
     if silent:
         console.print(str(result.path))
@@ -61,3 +77,5 @@ def capture_cmd(
     except ValueError:
         display = result.path
     console.print(f"  [cyan]{display}[/cyan]")
+    if index_warning:
+        console.print(f"  [yellow]⚠[/yellow] [dim]{index_warning}[/dim]")
