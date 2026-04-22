@@ -18,7 +18,6 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from mcs.adapters.llm import LLMError, call as core_llm_call
 from mcs.adapters.memory import (
     DOMAINS,
     MemoAmbiguous,
@@ -241,42 +240,6 @@ async def okr_update_objective(
     except (OKRError, OKRNotFound) as e:
         return {"error": str(e)}
     return obj.to_dict()
-
-
-@mcp.tool(
-    name="llm.call",
-    description=(
-        "Send a prompt to a local or remote LLM. Routing precedence: "
-        "`model` wins, else `task` maps via task defaults, else ollama-local. "
-        "`sensitive=True` forces a local provider."
-    ),
-)
-async def llm_call(
-    prompt: str,
-    model: str | None = None,
-    task: str | None = None,
-    sensitive: bool = False,
-    system: str | None = None,
-    temperature: float = 0.7,
-    max_tokens: int | None = None,
-    format: str | None = None,
-    think: bool | str | None = None,
-) -> dict[str, Any]:
-    """Returns {model, provider, remote_name, text, usage} or {error}."""
-    try:
-        return await core_llm_call(
-            prompt,
-            model=model,
-            task=task,
-            sensitive=sensitive,
-            system=system,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            format_=format,
-            think=think,
-        )
-    except LLMError as e:
-        return {"error": str(e)}
 
 
 @mcp.tool(
