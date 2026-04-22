@@ -32,3 +32,27 @@
 | [`SOUL.md`](SOUL.md) | 인격·톤·금지사항·기본 행동 |
 | [`AGENTS.md`](AGENTS.md) | 프로젝트 규약·스킬 라우팅·경계·도구 허용 |
 | `USER.md` → `brain/USER.md` | 사용자 프로필 (학습 + 수동, symlink) |
+
+---
+
+## 현재 사용 가능한 CLI (Day 7 기준)
+
+```bash
+# 데몬 (MCP HTTP 서버, Milvus 소유자 + 내장 watcher)
+mcs daemon start --daemon   # 백그라운드
+mcs daemon status           # 상태·pid·포트 확인
+mcs daemon stop
+
+# 메모 캡처 (기본: 데몬 경유, --direct로 우회 가능)
+mcs capture "가벼운 한 줄"                      # signals/
+mcs capture "면접 정리" -d career -e people/jane-smith
+mcs capture "..." -t "anthropic-mle-1st-round"  # slug 지정
+
+# 검색
+mcs search "면접"                               # 하이브리드 (vector + keyword)
+mcs search "LoRA" -d ml -n 5                    # 도메인 필터
+mcs search "..." -e people/jane-smith --json    # 엔티티 후처리 + JSON
+```
+
+**파일 watcher**: 데몬이 떠 있으면 `brain/signals/` 또는 `brain/domains/X/`에
+외부 에디터로 `.md` 파일 저장만 해도 frontmatter 자동 보충 + 인덱싱.
