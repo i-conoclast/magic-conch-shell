@@ -23,9 +23,11 @@ from mcs.adapters.memory import (
     MemoAmbiguous,
     MemoNotFound,
     capture as core_capture,
+    capture_structured as core_capture_structured,
     load_memo,
 )
 from mcs.adapters.search import search as core_search, sync_file
+from mcs.adapters.templates import TemplateError, list_templates, load_template
 from mcs.config import load_settings
 
 
@@ -109,6 +111,90 @@ async def memory_capture(
         "domain": result.domain,
         "indexed": indexed,
     }
+
+
+@mcp.tool(
+    name="memory.capture_structured",
+    description=(
+        "Capture a template-based structured record (interview, meeting, experiment)."
+        " Fields are coerced per the template schema."
+    ),
+)
+async def memory_capture_structured(
+    template: str,
+    fields: dict[str, Any] | None = None,
+    title: str | None = None,
+    source: str = "typed",
+    index: bool = True,
+) -> dict[str, Any]:
+    """Create a structured record. Returns {path, rel_path, id, type, domain, indexed}."""
+    try:
+        result = core_capture_structured(
+            template=template,
+            fields=fields or {},
+            title=title,
+            source=source,
+        )
+    except TemplateError as e:
+        return {"error": str(e)}
+
+    indexed = False
+    if index:
+        try:
+            await sync_file(result.path)
+            indexed = True
+        except Exception:
+            indexed = False
+
+    settings = load_settings()
+    try:
+        rel = str(result.path.resolve().relative_to(settings.repo_root.resolve()))
+    except ValueError:
+        rel = str(result.path)
+
+    return {
+        "path": str(result.path),
+        "rel_path": rel,
+        "id": result.id,
+        "type": result.type,
+        "domain": result.domain,
+        "indexed": indexed,
+    }
+
+
+@mcp.tool(
+    name="memory.templates_list",
+    description="List available structured-capture templates + their field schema.",
+)
+async def memory_templates_list() -> list[dict[str, Any]]:
+    """Return [{name, domain, fields}] for each template in templates/."""
+    out: list[dict[str, Any]] = []
+    for name in list_templates():
+        try:
+            t = load_template(name)
+        except TemplateError as e:
+            out.append({"name": name, "error": str(e)})
+            continue
+        out.append(
+            {
+                "name": t.name,
+                "domain": t.domain,
+                "default_type": t.default_type,
+                "fields": [
+                    {
+                        "name": f.name,
+                        "kind": f.kind,
+                        "prompt": f.prompt,
+                        "required": f.required,
+                        "values": f.values,
+                        "entity_kind": f.entity_kind,
+                    }
+                    for f in t.fields
+                ],
+                "body_sections": t.body_sections,
+            }
+        )
+    return out
 
 
 @mcp.tool(

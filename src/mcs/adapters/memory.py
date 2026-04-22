@@ -253,6 +253,106 @@ def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
     return True
 
 
+def capture_structured(
+    template: str,
+    fields: dict[str, object] | None = None,
+    *,
+    title: str | None = None,
+    source: str = "typed",
+) -> CaptureResult:
+    """Capture a template-based record.
+
+    - Loads `templates/<template>.md`.
+    - Coerces raw string fields via TemplateField rules.
+    - Builds frontmatter = {id, type, domain, template, <fields>, entities, created_at, source}.
+    - Body = scaffold of ## headers from template.body_sections (user edits after).
+    - Writes to brain/domains/<domain>/ (or brain/signals/ if domain unknown).
+    - Entities field is auto-populated by scanning entity-ref(-list) field values.
+
+    Returns the same CaptureResult shape as `capture()`.
+    """
+    # Late import avoids a circular dependency at module-load time
+    # (templates.py imports DOMAINS from this module).
+    from mcs.adapters.templates import (
+        Template,
+        TemplateError,
+        assemble_body,
+        coerce_field_value,
+        load_template,
+    )
+
+    tpl: Template = load_template(template)
+    fields = dict(fields or {})
+
+    # Coerce + validate
+    resolved: dict[str, object] = {}
+    for f in tpl.fields:
+        raw = fields.get(f.name)
+        if raw is None:
+            raw = ""
+        # Accept already-list for entity-ref-list (coming from MCP JSON)
+        if f.kind == "entity-ref-list" and isinstance(raw, list):
+            resolved[f.name] = [str(x).strip() for x in raw if str(x).strip()]
+            continue
+        resolved[f.name] = coerce_field_value(f, str(raw))
+
+    # Collect implied entities from entity-ref fields.
+    entities: list[str] = []
+    for f in tpl.fields:
+        val = resolved.get(f.name)
+        if f.kind == "entity-ref" and isinstance(val, str):
+            entities.append(val)
+        elif f.kind == "entity-ref-list" and isinstance(val, list):
+            entities.extend(val)
+
+    # Route to domain folder (fallback to signals if domain missing/unknown).
+    domain_for_routing = tpl.domain if tpl.domain in DOMAINS else None
+
+    settings = load_settings()
+    brain = settings.brain_dir.resolve()
+    now = now_kst()
+    slug = generate_slug(now=now, title=title or template)
+
+    meta = {
+        "id": slug,
+        "type": tpl.default_type or "note",
+        "template": tpl.name,
+        "domain": domain_for_routing,
+        "entities": entities,
+        "created_at": now.isoformat(),
+        "source": source,
+    }
+    # Merge template field values, skipping None and the reserved keys.
+    for k, v in resolved.items():
+        if v is None:
+            continue
+        if k in meta:
+            continue
+        meta[k] = v
+
+    folder = _target_folder(brain, domain_for_routing)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    path = folder / f"{slug}.md"
+    counter = 2
+    base = path.with_suffix("")
+    while path.exists():
+        path = base.with_name(f"{base.name}-{counter}").with_suffix(".md")
+        counter += 1
+
+    meta["id"] = path.stem
+    body = assemble_body(tpl)
+    post = frontmatter.Post(body, **meta)
+    path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
+
+    return CaptureResult(
+        path=path,
+        id=meta["id"],
+        type=str(meta["type"]),
+        domain=domain_for_routing,
+    )
+
+
 def capture(
     text: str,
     domain: str | None = None,
