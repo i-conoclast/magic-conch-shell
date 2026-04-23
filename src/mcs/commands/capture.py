@@ -3,17 +3,29 @@
 Default path goes through the MCP daemon so the Milvus index is owned
 by a single process. `--direct` bypasses the daemon for debugging or
 when the daemon is intentionally offline.
+
+`--kr <kr-id>` (repeatable) links the memo to a KR: the kr-id lands in
+the frontmatter `okrs:` field as lightweight back-evidence. Adding
+`--increment N` also bumps the KR's `current` by N via the okr adapter
+so progress stays in sync without a second command.
 """
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
 
 from mcs.adapters.daemon_client import DaemonUnreachable, call_tool
 from mcs.adapters.memory import DOMAINS, capture as core_capture
+from mcs.adapters.okr import (
+    OKRError,
+    OKRNotFound,
+    get_kr as core_get_kr,
+    update_kr as core_update_kr,
+)
 from mcs.config import load_settings
 
 console = Console()
@@ -27,12 +39,15 @@ def _print_result(
     path: Path,
     index_warning: str | None,
     silent: bool,
+    kr_updates: list[str] | None = None,
 ) -> None:
     if silent:
         console.print(str(path))
         return
     console.print(f"[green]✓[/green] [bold]{kind}[/bold] · [dim]{id_}[/dim]")
     console.print(f"  [cyan]{rel_path}[/cyan]")
+    for line in kr_updates or []:
+        console.print(f"  [dim]kr:[/dim] {line}")
     if index_warning:
         console.print(f"  [yellow]⚠[/yellow] [dim]{index_warning}[/dim]")
 
@@ -43,6 +58,7 @@ def _capture_direct(
     domain: str | None,
     entities: list[str],
     title: str | None,
+    okrs: list[str],
     no_index: bool,
 ) -> tuple[str, str, str, Path, str | None]:
     """Run capture without going through the daemon. Returns display fields."""
@@ -52,6 +68,7 @@ def _capture_direct(
         entities=entities,
         source="typed",
         title=title,
+        okrs=okrs,
     )
     index_warning: str | None = None
     if not no_index:
@@ -76,13 +93,15 @@ def _capture_via_daemon(
     domain: str | None,
     entities: list[str],
     title: str | None,
+    okrs: list[str],
     no_index: bool,
 ) -> tuple[str, str, str, Path, str | None]:
     """Send capture to the daemon via MCP."""
-    payload = {
+    payload: dict[str, Any] = {
         "text": text,
         "domain": domain,
         "entities": entities,
+        "okrs": okrs,
         "source": "typed",
         "title": title,
         "index": not no_index,
@@ -99,6 +118,48 @@ def _capture_via_daemon(
     )
 
 
+def _bump_krs(
+    kr_ids: list[str], increment: float, direct: bool
+) -> list[str]:
+    """Add `increment` to each KR's `current`. Returns human-readable diff lines.
+
+    Uses the daemon's MCP tool when available, falls back to direct adapter
+    calls when --direct is set OR the daemon call fails mid-run.
+    """
+    lines: list[str] = []
+    for kr_id in kr_ids:
+        try:
+            if direct:
+                before = core_get_kr(kr_id)
+                new_current = (before.current or 0.0) + increment
+                after = core_update_kr(kr_id, current=new_current)
+                lines.append(
+                    f"{kr_id}: current {before.current:g} → {after.current:g}"
+                )
+            else:
+                before = asyncio.run(call_tool("okr.get_kr", {"kr_id": kr_id}))
+                if "error" in before:
+                    lines.append(f"{kr_id}: [red]{before['error']}[/red]")
+                    continue
+                new_current = float(before.get("current") or 0) + increment
+                after = asyncio.run(
+                    call_tool(
+                        "okr.update_kr",
+                        {"kr_id": kr_id, "fields": {"current": new_current}},
+                    )
+                )
+                if "error" in after:
+                    lines.append(f"{kr_id}: [red]{after['error']}[/red]")
+                    continue
+                lines.append(
+                    f"{kr_id}: current {float(before.get('current') or 0):g} "
+                    f"→ {float(after['current']):g}"
+                )
+        except (OKRError, OKRNotFound) as e:
+            lines.append(f"{kr_id}: [red]{e}[/red]")
+    return lines
+
+
 def capture_cmd(
     text: str = typer.Argument(..., help="Memo text."),
     domain: str | None = typer.Option(
@@ -112,6 +173,23 @@ def capture_cmd(
         "-e",
         "--entity",
         help="Entity slug to link (repeatable). Example: -e people/jane-smith",
+    ),
+    kr: list[str] | None = typer.Option(
+        None,
+        "-k",
+        "--kr",
+        help=(
+            "KR id to back-link (repeatable). Example:"
+            " -k 2026-Q2-career-mle-role.kr-2"
+        ),
+    ),
+    increment: float = typer.Option(
+        0.0,
+        "--increment",
+        help=(
+            "Bump every linked KR's `current` by this value after writing"
+            " the memo (default 0 = no bump). Applies to each --kr given."
+        ),
     ),
     title: str | None = typer.Option(
         None,
@@ -132,6 +210,7 @@ def capture_cmd(
     ),
 ) -> None:
     """Capture a one-line memo to brain/."""
+    okrs_list = list(kr or [])
     try:
         if direct:
             fields = _capture_direct(
@@ -139,6 +218,7 @@ def capture_cmd(
                 domain=domain,
                 entities=entity or [],
                 title=title,
+                okrs=okrs_list,
                 no_index=no_index,
             )
         else:
@@ -147,6 +227,7 @@ def capture_cmd(
                 domain=domain,
                 entities=entity or [],
                 title=title,
+                okrs=okrs_list,
                 no_index=no_index,
             )
     except ValueError as e:
@@ -160,6 +241,11 @@ def capture_cmd(
         raise typer.Exit(code=3) from e
 
     kind, id_, rel, path, index_warning = fields
+
+    kr_updates: list[str] = []
+    if okrs_list and increment:
+        kr_updates = _bump_krs(okrs_list, increment, direct)
+
     _print_result(
         kind=kind,
         id_=id_,
@@ -167,4 +253,5 @@ def capture_cmd(
         path=path,
         index_warning=index_warning,
         silent=silent,
+        kr_updates=kr_updates,
     )

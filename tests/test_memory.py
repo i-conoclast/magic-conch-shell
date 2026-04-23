@@ -223,6 +223,37 @@ def test_resolve_ambiguous_raises_with_candidates(tmp_brain: Path) -> None:
     assert b.path in [p.resolve() for p in info.value.candidates]
 
 
+def test_capture_persists_okrs_frontmatter(tmp_brain: Path) -> None:
+    result = capture(
+        text="mock interview 1회 완료",
+        domain="career",
+        entities=["people/jane-smith"],
+        okrs=["2026-Q2-career-mle-role.kr-2"],
+    )
+    meta = _read_meta(result.path)
+    assert meta["okrs"] == ["2026-Q2-career-mle-role.kr-2"]
+
+
+def test_capture_multiple_okrs(tmp_brain: Path) -> None:
+    result = capture(
+        text="LoRA 3회 + mock interview 연계 작업",
+        domain="ml",
+        okrs=[
+            "2026-Q2-career-mle-role.kr-2",
+            "2026-Q2-ml-rag-mastery.kr-1",
+        ],
+    )
+    meta = _read_meta(result.path)
+    assert len(meta["okrs"]) == 2
+
+
+def test_capture_empty_okrs_omits_field(tmp_brain: Path) -> None:
+    """`okrs:` key should stay out of frontmatter when no links were given."""
+    result = capture(text="just a thought")
+    meta = _read_meta(result.path)
+    assert "okrs" not in meta
+
+
 def test_load_memo_parses_frontmatter_and_body(tmp_brain: Path) -> None:
     r = capture(
         text="body line 1\nbody line 2",

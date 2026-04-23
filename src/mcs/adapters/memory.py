@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 import frontmatter
@@ -359,6 +359,7 @@ def capture(
     entities: Iterable[str] | None = None,
     source: str = "typed",
     title: str | None = None,
+    okrs: Iterable[str] | None = None,
 ) -> CaptureResult:
     """Capture a one-line memo to brain/.
 
@@ -368,6 +369,9 @@ def capture(
         entities: Entity slugs to link (list of `kind/slug`).
         source:   Where the capture came from. typed | chat | file-watcher | hermes-generated | auto-promoted.
         title:    Optional slug-friendly title (else auto-timestamp).
+        okrs:     KR ids this memo relates to. Persisted as `okrs: [...]`
+                  in frontmatter — a lightweight back-link so KRs can
+                  surface their evidence captures later.
 
     Returns:
         CaptureResult with path and id.
@@ -386,7 +390,7 @@ def capture(
     now = now_kst()
     slug = generate_slug(now=now, title=title)
 
-    meta = {
+    meta: dict[str, Any] = {
         "id": slug,
         "type": "note" if domain else "signal",
         "domain": domain,
@@ -394,6 +398,9 @@ def capture(
         "created_at": now.isoformat(),
         "source": source,
     }
+    okr_list = [s.strip() for s in (okrs or []) if s and s.strip()]
+    if okr_list:
+        meta["okrs"] = okr_list
 
     folder = _target_folder(brain, domain)
     folder.mkdir(parents=True, exist_ok=True)
