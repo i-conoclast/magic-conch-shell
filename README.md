@@ -35,7 +35,7 @@
 
 ---
 
-## 현재 사용 가능한 CLI (Day 10 기준)
+## 현재 사용 가능한 CLI (Day 13 기준)
 
 ### 데몬 (MCP HTTP 서버 — Milvus 소유자 + 내장 watcher)
 ```bash
@@ -50,6 +50,12 @@ mcs daemon stop
 mcs capture "가벼운 한 줄"                      # signals/
 mcs capture "면접 정리" -d career -e people/jane-smith
 mcs capture "..." -t "anthropic-mle-1st-round"  # slug 지정
+
+# KR 백링크 + 진척 자동 업데이트
+mcs capture "mock interview 2회" -d career \
+    --kr 2026-Q2-career-mle-role.kr-2 --increment 2
+# → frontmatter 에 okrs: [...] 기록 + KR current += 2
+# → target 도달 시 status 자동 achieved
 
 # 구조화 기록 (FR-A2 — 템플릿 기반)
 mcs log                                         # 사용 가능한 템플릿 목록
@@ -69,20 +75,36 @@ mcs show signals/2026-04-22-foo --json          # 경로 형태도 허용
 
 ### OKR — planning SSoT
 ```bash
-# Agent-driven (Hermes skill 대화형)
-mcs okr new "커리어 OKR 하나 세우자"            # okr-intake 스킬 REPL
-mcs okr new --resume okr-intake-YYYYMMDD-HHMMSS # 중단된 인테이크 재개
+# Agent-driven (Hermes skill 대화형, 상태별 skill 자동 호출)
+mcs okr new "커리어 OKR 하나 세우자"            # okr-intake + KR agent spawn 옵션
+mcs okr new --resume okr-intake-YYYYMMDD-HHMMSS
 mcs okr update 2026-Q2-career-mle-role -i       # okr-update 주간 체크인
+                                                 # terminal 전이 시 agent archive 프롬프트
+mcs okr sync                                    # capture-progress-sync — 오늘 캡처 일괄
+mcs okr sync 2026-04-22                         # 특정 일자
 
 # Mechanical (데이터만, Hermes 거치지 않음)
-mcs okr list                                    # 활성 + 달성 OKR 테이블
+mcs okr list                                    # 기본: 현재 분기·active만
+mcs okr list -q all -s all                      # 전 기간·전 상태
 mcs okr list -q 2026-Q2 -d career
-mcs okr show 2026-Q2-career-mle-role            # KR 포함 상세
-mcs okr update <kr-id> --current 1 --status achieved
+mcs okr show 2026-Q2-career-mle-role            # KR 포함 상세 + 본문 마크다운
+mcs okr update <kr-id> --current 1              # auto-transition: target 도달 시 achieved
 mcs okr close 2026-Q2-career-mle-role --note "Offer 수락"
+                                                 # cascade: 남은 KR 자동 일괄 상태 전이
 mcs okr kr-add <obj-id> --text "연봉 협상" --target 1 --due 2026-06-30
+mcs okr kr-list                                 # 기본: 미달성 + active objective만
 mcs okr kr-list --due-before 2026-05-15         # 마감 임박
+mcs okr kr-list --include-closed                # paused/achieved 부모 포함
 ```
+
+### KR 전용 에이전트 (동적 생성)
+- `mcs okr new` 가 각 KR 저장 후 "agent 만들까?" 물음
+- 수락 시 `skills/objectives/<dashed-kr-id>/SKILL.md` 자동 생성
+  (KR 목표·부모 맥락·acceptance criteria 포함)
+- Hermes 에서 `/<dashed-kr-id>` 로 해당 KR 작업 세션 기동
+- KR 이 achieved/missed/abandoned 로 전이되면 `mcs okr update -i` 가
+  archive / delete / keep 중 처리 프롬프트
+- archive 경로: `archive/skills/objectives/<slug>-<date>/` (미러 구조, `mv` 로 복원)
 
 ### 공통 옵션
 - `--json` — 모든 조회 명령
