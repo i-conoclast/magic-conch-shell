@@ -664,6 +664,79 @@ def spawn_kr_agent(
     return skill_path
 
 
+def _archive_skills_root() -> Path:
+    """`archive/skills/objectives/` mirrors the live path so restoration is a move."""
+    return load_settings().repo_root.resolve() / "archive" / "skills" / "objectives"
+
+
+_VALID_ARCHIVE_ACTIONS = frozenset({"archive", "delete", "keep"})
+
+
+def archive_kr_agent(
+    kr_id: str,
+    *,
+    action: str = "archive",
+) -> dict[str, str]:
+    """Close out a KR's agent folder when the KR reaches a terminal state.
+
+    Actions:
+      - 'archive': move `skills/objectives/<slug>/` to
+        `archive/skills/objectives/<slug>-<YYYY-MM-DD>/`. The
+        mirror layout makes restoration a single `mv` back.
+      - 'delete': remove the folder.
+      - 'keep':   leave the folder in place but stamp
+        `metadata.mcs.archived_on` so the agent self-describes as
+        closed when invoked.
+
+    Returns a dict summarising what happened: `{action, source, dest?}`.
+    """
+    if action not in _VALID_ARCHIVE_ACTIONS:
+        raise OKRError(
+            f"unknown archive action {action!r} "
+            f"(must be one of {sorted(_VALID_ARCHIVE_ACTIONS)})"
+        )
+
+    path = find_kr_agent(kr_id)
+    if path is None:
+        raise OKRNotFound(f"no agent found for kr {kr_id!r}")
+    folder = path.parent
+
+    if action == "delete":
+        import shutil
+        shutil.rmtree(folder)
+        return {"action": "delete", "source": str(folder)}
+
+    if action == "keep":
+        post = frontmatter.load(path)
+        meta = dict(post.metadata or {})
+        nested = dict(meta.get("metadata") or {})
+        mcs_block = dict(nested.get("mcs") or meta.get("mcs") or {})
+        mcs_block["archived_on"] = datetime.now(KST).strftime("%Y-%m-%d")
+        if "metadata" in meta or nested:
+            nested["mcs"] = mcs_block
+            meta["metadata"] = nested
+        else:
+            meta["mcs"] = mcs_block
+        path.write_text(
+            frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+            encoding="utf-8",
+        )
+        return {"action": "keep", "source": str(folder)}
+
+    # action == 'archive'
+    import shutil
+    date = datetime.now(KST).strftime("%Y-%m-%d")
+    dest_root = _archive_skills_root()
+    dest_root.mkdir(parents=True, exist_ok=True)
+    dest = dest_root / f"{folder.name}-{date}"
+    counter = 2
+    while dest.exists():
+        dest = dest_root / f"{folder.name}-{date}-{counter}"
+        counter += 1
+    shutil.move(str(folder), str(dest))
+    return {"action": "archive", "source": str(folder), "dest": str(dest)}
+
+
 def find_kr_agent(kr_id: str) -> Path | None:
     """Return the SKILL.md path for a KR agent, or None if not spawned."""
     root = _skills_objectives_root()

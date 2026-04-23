@@ -14,6 +14,8 @@ metadata:
       - mcp_mcs_okr_get
       - mcp_mcs_okr_update_kr
       - mcp_mcs_okr_update_objective
+      - mcp_mcs_okr_find_kr_agent
+      - mcp_mcs_okr_archive_kr_agent
 ---
 
 # OKR 업데이트
@@ -75,6 +77,12 @@ KRs:
 3. **필드 변경 확인**: "current: 0 → 1, status: in_progress → achieved. 맞아?"
 4. 사용자 승인 → `mcp_mcs_okr_update_kr(kr_id, fields={...})` 호출
 5. 한 줄 확인: "✓ kr-2 업데이트됨."
+6. **KR 이 방금 terminal 상태로 전이했다면** (achieved / missed / abandoned):
+   - `mcp_mcs_okr_find_kr_agent(kr_id)` 호출
+   - 결과에 agent 가 있으면: "이 KR 전용 agent `<slug>` 처리: archive / delete / keep?" 질문
+   - 사용자 응답 → `mcp_mcs_okr_archive_kr_agent(kr_id, action=...)` 호출
+   - "모르겠어" / 무응답 → 기본 `archive` (이력 보존)
+   - 한 줄 확인: "✓ agent archived." / "✓ agent deleted." / "✓ agent kept (stamped archived_on)."
 
 사용자가 중간에 "나머지는 다음에" 말하면 **지금까지의 업데이트는 유지**하고
 종료.
@@ -109,6 +117,8 @@ KRs:
 | `mcp_mcs_okr_get` | Phase 2 현 상태 로드 |
 | `mcp_mcs_okr_update_kr` | Phase 3 각 KR 변경 확정 |
 | `mcp_mcs_okr_update_objective` | Phase 4 Objective 수준 반영 |
+| `mcp_mcs_okr_find_kr_agent` | Phase 3.6 terminal 전이 후 agent 존재 확인 |
+| `mcp_mcs_okr_archive_kr_agent` | Phase 3.6 agent 처리 (archive/delete/keep) |
 
 ## 하지 말 것
 

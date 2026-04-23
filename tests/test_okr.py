@@ -426,6 +426,134 @@ def test_find_kr_agent_returns_none_for_unknown(
     assert find_kr_agent("2026-Q2-nope.kr-1") is None
 
 
+# ─── archive_kr_agent ───────────────────────────────────────────────────
+
+import re  # noqa: E402
+
+
+def test_archive_kr_agent_archive_moves_to_mirror_path(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters import okr as okr_mod
+    from mcs.adapters.okr import archive_kr_agent, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+
+    obj = create_objective(slug="arch", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="t")
+    skill_path = spawn_kr_agent(kr.id)
+
+    result = archive_kr_agent(kr.id, action="archive")
+    assert result["action"] == "archive"
+    assert not skill_path.parent.exists()
+    dest = Path(result["dest"])
+    assert dest.exists()
+    assert dest.parent == root / "archive" / "skills" / "objectives"
+    assert (dest / "SKILL.md").exists()
+    assert re.match(r"^2026-Q2-arch-kr-1-\d{4}-\d{2}-\d{2}$", dest.name)
+
+
+def test_archive_kr_agent_delete_removes_folder(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters import okr as okr_mod
+    from mcs.adapters.okr import archive_kr_agent, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+
+    obj = create_objective(slug="del", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="t")
+    skill_path = spawn_kr_agent(kr.id)
+    archive_kr_agent(kr.id, action="delete")
+    assert not skill_path.exists()
+    assert not skill_path.parent.exists()
+
+
+def test_archive_kr_agent_keep_stamps_archived_on(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters import okr as okr_mod
+    from mcs.adapters.okr import archive_kr_agent, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+
+    obj = create_objective(slug="keep", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="t")
+    skill_path = spawn_kr_agent(kr.id)
+    archive_kr_agent(kr.id, action="keep")
+
+    post = frontmatter.load(skill_path)
+    mcs_block = (post.metadata or {}).get("metadata", {}).get("mcs", {})
+    assert "archived_on" in mcs_block
+    assert re.match(r"^\d{4}-\d{2}-\d{2}$", mcs_block["archived_on"])
+
+
+def test_archive_kr_agent_missing_raises(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters import okr as okr_mod
+    from mcs.adapters.okr import OKRNotFound, archive_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+    with pytest.raises(OKRNotFound):
+        archive_kr_agent("2026-Q2-missing.kr-1", action="archive")
+
+
+def test_archive_kr_agent_rejects_bad_action(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters import okr as okr_mod
+    from mcs.adapters.okr import OKRError, archive_kr_agent, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+
+    obj = create_objective(slug="bad-a", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="t")
+    spawn_kr_agent(kr.id)
+    with pytest.raises(OKRError, match="unknown archive action"):
+        archive_kr_agent(kr.id, action="incinerate")
+
+
+def test_archive_kr_agent_archive_collision_gets_suffix(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """Archiving the same KR twice on the same day gets a -2 suffix."""
+    from mcs import config as cfg
+    from mcs.adapters import okr as okr_mod
+    from mcs.adapters.okr import archive_kr_agent, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+
+    obj = create_objective(slug="col", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="t")
+    spawn_kr_agent(kr.id)
+    first = archive_kr_agent(kr.id, action="archive")
+    spawn_kr_agent(kr.id)
+    second = archive_kr_agent(kr.id, action="archive")
+
+    assert first["dest"] != second["dest"]
+    assert Path(first["dest"]).exists()
+    assert Path(second["dest"]).exists()
+    assert second["dest"].endswith("-2")
+
+
 def _with_root(settings, root: Path):
     """Test helper — mutate settings.repo_root in place."""
     settings.repo_root = root

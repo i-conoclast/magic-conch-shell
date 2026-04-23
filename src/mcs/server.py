@@ -29,6 +29,7 @@ from mcs.adapters.memory import (
 from mcs.adapters.okr import (
     OKRError,
     OKRNotFound,
+    archive_kr_agent as core_okr_archive_kr_agent,
     create_kr as core_okr_create_kr,
     create_objective as core_okr_create_objective,
     find_kr_agent as core_okr_find_kr_agent,
@@ -287,6 +288,25 @@ async def okr_spawn_kr_agent(
         "slug": path.parent.name,
         "created": True,
     }
+
+
+@mcp.tool(
+    name="okr.archive_kr_agent",
+    description=(
+        "Close out a KR's agent folder. action='archive' moves it to"
+        " archive/skills/objectives/<slug>-<YYYY-MM-DD>/ (restore via mv);"
+        " 'delete' removes it; 'keep' leaves the folder but stamps"
+        " metadata.mcs.archived_on so the agent self-describes as closed."
+    ),
+)
+async def okr_archive_kr_agent(
+    kr_id: str, action: str = "archive"
+) -> dict[str, Any]:
+    try:
+        result = core_okr_archive_kr_agent(kr_id, action=action)
+    except (OKRError, OKRNotFound) as e:
+        return {"error": str(e)}
+    return result
 
 
 @mcp.tool(
