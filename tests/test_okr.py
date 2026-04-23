@@ -323,6 +323,115 @@ def test_update_kr_no_current_change_no_auto_transition(tmp_brain: Path) -> None
 
 # ─── current_quarter helper ────────────────────────────────────────────
 
+# ─── KR agent spawn / find ──────────────────────────────────────────────
+
+def test_spawn_kr_agent_writes_skill_md(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """spawn writes SKILL.md at skills/objectives/<dashed-kr-id>/."""
+    from mcs import config as cfg
+    from mcs.adapters import okr as okr_mod
+    from mcs.adapters.okr import spawn_kr_agent
+    # Redirect repo_root to a clean tmp path so the real repo isn't polluted.
+    root = tmp_path / "repo"
+    root.mkdir()
+    orig = cfg.load_settings
+
+    def fake():
+        return _with_root(orig(), root)
+
+    monkeypatch.setattr(okr_mod, "load_settings", fake)
+
+    obj = create_objective(slug="agent-spawn", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="mock interview 3회", target=3, current=0)
+
+    path = spawn_kr_agent(kr.id, acceptance_criteria=["첫 번째 조건", "두 번째 조건"])
+    assert path.exists()
+    assert path.parent.name == "2026-Q2-agent-spawn-kr-1"
+    assert path.parent.parent == root / "skills" / "objectives"
+
+    post = frontmatter.load(path)
+    meta = post.metadata or {}
+    assert meta["name"] == "2026-Q2-agent-spawn-kr-1"
+    assert meta["metadata"]["mcs"]["kr_id"] == kr.id
+    assert meta["metadata"]["mcs"]["parent_objective"] == obj.id
+    assert "첫 번째 조건" in post.content
+    assert "mock interview 3회" in post.content
+
+
+def test_spawn_kr_agent_rejects_duplicate_without_overwrite(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters.okr import OKRError, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    from mcs.adapters import okr as okr_mod
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+
+    obj = create_objective(slug="dup", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="x")
+    spawn_kr_agent(kr.id)
+    with pytest.raises(OKRError, match="already exists"):
+        spawn_kr_agent(kr.id)
+    # overwrite=True succeeds
+    spawn_kr_agent(kr.id, overwrite=True)
+
+
+def test_spawn_kr_agent_missing_kr_raises(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters.okr import OKRNotFound, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    from mcs.adapters import okr as okr_mod
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+    with pytest.raises(OKRNotFound):
+        spawn_kr_agent("2026-Q2-no-such.kr-1")
+
+
+def test_find_kr_agent_returns_path_for_existing(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters.okr import find_kr_agent, spawn_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    from mcs.adapters import okr as okr_mod
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+
+    obj = create_objective(slug="find", quarter="2026-Q2", domain="ml")
+    kr = create_kr(obj.id, text="y")
+    assert find_kr_agent(kr.id) is None    # before spawn
+    spawn_kr_agent(kr.id)
+    found = find_kr_agent(kr.id)
+    assert found is not None
+    assert found.name == "SKILL.md"
+
+
+def test_find_kr_agent_returns_none_for_unknown(
+    tmp_brain: Path, tmp_path: Path, monkeypatch
+) -> None:
+    from mcs import config as cfg
+    from mcs.adapters.okr import find_kr_agent
+    root = tmp_path / "repo"
+    root.mkdir()
+    from mcs.adapters import okr as okr_mod
+    orig = cfg.load_settings
+    monkeypatch.setattr(okr_mod, "load_settings", lambda: _with_root(orig(), root))
+    assert find_kr_agent("2026-Q2-nope.kr-1") is None
+
+
+def _with_root(settings, root: Path):
+    """Test helper — mutate settings.repo_root in place."""
+    settings.repo_root = root
+    return settings
+
+
 def test_current_quarter_computes_from_kst_month() -> None:
     from datetime import datetime
     from zoneinfo import ZoneInfo

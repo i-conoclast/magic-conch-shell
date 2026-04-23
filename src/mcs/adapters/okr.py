@@ -552,3 +552,142 @@ def _touch_parent_by_kr(kr_id: str) -> None:
         _touch_parent(_find_objective_path(parent_id))
     except OKRNotFound:
         pass
+
+
+# ─── KR agent spawn / find ──────────────────────────────────────────────
+
+def _agent_dir_name(kr_id: str) -> str:
+    """`2026-Q2-career-mle-role.kr-1` → `2026-Q2-career-mle-role-kr-1`."""
+    return kr_id.replace(".", "-")
+
+
+def _skills_objectives_root() -> Path:
+    return load_settings().repo_root.resolve() / "skills" / "objectives"
+
+
+_KR_AGENT_SKILL_TEMPLATE = """\
+---
+name: {slug}
+description: |
+  Working agent for KR "{kr_text}" under Objective {parent_id}.
+  Invoke via /{slug}. Loads the current KR state, surfaces linked
+  captures, and helps the user push progress forward.
+metadata:
+  hermes:
+    tags: [objectives, kr-agent]
+    requires_tools:
+      - mcp_mcs_okr_get_kr
+      - mcp_mcs_okr_update_kr
+      - mcp_mcs_memory_search
+      - mcp_mcs_memory_capture
+  mcs:
+    kr_id: {kr_id}
+    parent_objective: {parent_id}
+    created_at: {created_at}
+---
+
+# {kr_text}
+
+## 역할
+이 KR 전용 작업 보조. 세션 시작 때:
+
+1. `mcp_mcs_okr_get_kr(kr_id="{kr_id}")` 로 현재 상태 (current/target/status/due) 로드
+2. 필요 시 `mcp_mcs_memory_search` 로 이 KR 에 링크된 메모 조회
+3. 사용자 요청에 맞춰 작업 지원 (계획 제안·진척 기록·관련 메모 캡처)
+
+진척이 생기면 `mcp_mcs_okr_update_kr` 로 current 증가. 새 관찰/결정은
+`mcp_mcs_memory_capture` 로 `okrs=["{kr_id}"]` 링크해서 저장.
+
+## KR 목표
+- **Text**: {kr_text}
+- **Target**: {target} {unit}
+- **Due**: {due_str}
+- **Parent Objective**: {parent_id}
+
+## Acceptance Criteria
+{acceptance_block}
+
+## 작업 원칙
+- 짧게 대화 (SOUL.md consulting 톤).
+- 이 KR 과 무관한 주제로 샛길 가지 말기.
+- 달성 직전 (current == target) 되면 사용자에게 "close 할까?" 물어보기.
+
+## 진척 기록
+(신규 진척 발생 시 날짜 + 한 줄 요약 아래에 append)
+
+"""
+
+
+def spawn_kr_agent(
+    kr_id: str,
+    *,
+    acceptance_criteria: list[str] | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Create `skills/objectives/<dashed-kr-id>/SKILL.md` for a KR.
+
+    Idempotent: if the agent folder already exists, raises unless
+    `overwrite=True`. Loads the KR + parent Objective to populate
+    the template. Returns the SKILL.md path.
+    """
+    kr = get_kr(kr_id)  # raises OKRNotFound if missing
+    parent_id = kr.parent
+    slug = _agent_dir_name(kr_id)
+    folder = _skills_objectives_root() / slug
+    skill_path = folder / "SKILL.md"
+
+    if skill_path.exists() and not overwrite:
+        raise OKRError(
+            f"agent for {kr_id!r} already exists at {skill_path} "
+            f"(pass overwrite=True to replace)"
+        )
+
+    crit_lines = acceptance_criteria or ["TODO: 첫 번째 인수 조건"]
+    acceptance_block = "\n".join(f"- [ ] {line}" for line in crit_lines)
+    due_str = kr.due or "TBD"
+
+    folder.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(
+        _KR_AGENT_SKILL_TEMPLATE.format(
+            slug=slug,
+            kr_id=kr_id,
+            kr_text=kr.text,
+            target=_fmt_num(kr.target),
+            unit=kr.unit,
+            due_str=due_str,
+            parent_id=parent_id,
+            acceptance_block=acceptance_block,
+            created_at=_now(),
+        ),
+        encoding="utf-8",
+    )
+    return skill_path
+
+
+def find_kr_agent(kr_id: str) -> Path | None:
+    """Return the SKILL.md path for a KR agent, or None if not spawned."""
+    root = _skills_objectives_root()
+    if not root.exists():
+        return None
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        skill = folder / "SKILL.md"
+        if not skill.exists():
+            continue
+        try:
+            post = frontmatter.load(skill)
+        except Exception:
+            continue
+        meta = post.metadata or {}
+        mcs_block = meta.get("metadata", {}).get("mcs") if isinstance(
+            meta.get("metadata"), dict
+        ) else None
+        # Support both nested and flat mcs block locations.
+        ref = (mcs_block or meta.get("mcs") or {})
+        if isinstance(ref, dict) and ref.get("kr_id") == kr_id:
+            return skill.resolve()
+    return None
+
+
+def _fmt_num(n: float) -> str:
+    """Render floats without trailing .0 when they're whole."""
+    return f"{n:g}"

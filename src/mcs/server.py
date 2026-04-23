@@ -31,9 +31,11 @@ from mcs.adapters.okr import (
     OKRNotFound,
     create_kr as core_okr_create_kr,
     create_objective as core_okr_create_objective,
+    find_kr_agent as core_okr_find_kr_agent,
     get as core_okr_get,
     get_kr as core_okr_get_kr,
     list_active as core_okr_list_active,
+    spawn_kr_agent as core_okr_spawn_kr_agent,
     update_kr as core_okr_update_kr,
     update_objective as core_okr_update_objective,
 )
@@ -251,6 +253,64 @@ async def okr_update_objective(
     except (OKRError, OKRNotFound) as e:
         return {"error": str(e)}
     return obj.to_dict()
+
+
+@mcp.tool(
+    name="okr.spawn_kr_agent",
+    description=(
+        "Create a per-KR Hermes skill at skills/objectives/<dashed-kr-id>/SKILL.md."
+        " Populates goal/parent context/acceptance criteria from the KR + Objective."
+        " Returns {path, slug, created} or {error}."
+    ),
+)
+async def okr_spawn_kr_agent(
+    kr_id: str,
+    acceptance_criteria: list[str] | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    try:
+        path = core_okr_spawn_kr_agent(
+            kr_id,
+            acceptance_criteria=acceptance_criteria,
+            overwrite=overwrite,
+        )
+    except (OKRError, OKRNotFound) as e:
+        return {"error": str(e)}
+    settings = load_settings()
+    try:
+        rel = str(path.relative_to(settings.repo_root.resolve()))
+    except ValueError:
+        rel = str(path)
+    return {
+        "path": str(path),
+        "rel_path": rel,
+        "slug": path.parent.name,
+        "created": True,
+    }
+
+
+@mcp.tool(
+    name="okr.find_kr_agent",
+    description=(
+        "Look up the SKILL.md path for a given KR id via metadata.mcs.kr_id."
+        " Returns {path, slug} if found, {found: False} otherwise."
+    ),
+)
+async def okr_find_kr_agent(kr_id: str) -> dict[str, Any]:
+    path = core_okr_find_kr_agent(kr_id)
+    if path is None:
+        return {"found": False}
+    settings = load_settings()
+    try:
+        rel = str(path.relative_to(settings.repo_root.resolve()))
+    except ValueError:
+        rel = str(path)
+    return {
+        "found": True,
+        "path": str(path),
+        "rel_path": rel,
+        "slug": path.parent.name,
+    }
 
 
 @mcp.tool(

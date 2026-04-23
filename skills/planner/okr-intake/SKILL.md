@@ -12,6 +12,7 @@ metadata:
       - mcp_mcs_okr_list_active
       - mcp_mcs_okr_create_objective
       - mcp_mcs_okr_create_kr
+      - mcp_mcs_okr_spawn_kr_agent
       - mcp_mcs_memory_search
 ---
 
@@ -68,6 +69,16 @@ metadata:
 - 각각 한 줄 + (target, unit, 예상 due) 추천.
 - 사용자가 고르고 / 수정하고 / 제외. 확정한 것부터 `okr.create_kr` 호출.
 
+**각 KR 저장 직후 — 전용 agent 생성 옵션**:
+1. `okr.create_kr` 성공 후, 바로 "이 KR 전용 agent 만들까? (y/n/skip)" 질문.
+2. `n` / `skip` → 다음 KR 로.
+3. `y` → 선택적으로 acceptance criteria 수집:
+   - "이 KR 이 '완료' 라고 보는 구체 기준 1~3개? (skip 하면 템플릿 TODO 만)"
+   - 사용자가 "skip" / 빈 응답 → 기본 TODO 하나로
+   - 아니면 한 줄씩 수집 (최대 3개)
+4. `mcp_mcs_okr_spawn_kr_agent(kr_id, acceptance_criteria=[...])` 호출
+5. 성공 시 한 줄: "✓ agent `/<slug>` 생성됨. 이 KR 작업 시 호출 가능."
+
 **중단·보류**:
 - 사용자가 "나머지는 나중에" 하면 현재까지 저장된 상태를 요약 출력하고 종료.
 - Objective 는 만들어졌지만 KR 이 0개여도 문제 없다. 나중에 `mcs okr kr-add`
@@ -107,6 +118,7 @@ metadata:
 | `mcp_mcs_memory_search` | Objective 사유 쓸 때 관련 과거 메모 참조 (선택) |
 | `mcp_mcs_okr_create_objective` | Phase 2 draft 저장 |
 | `mcp_mcs_okr_create_kr` | Phase 3 각 KR 확정 시 |
+| `mcp_mcs_okr_spawn_kr_agent` | Phase 3 KR 저장 직후 "agent 만들까?" 수락 시 |
 
 ## 종료 조건
 
