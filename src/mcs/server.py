@@ -128,11 +128,20 @@ async def memory_capture(
 
 @mcp.tool(
     name="okr.list_active",
-    description="List active+achieved Objectives (optionally filtered to one quarter).",
+    description=(
+        "List Objectives (default status ∈ {active, achieved})."
+        " Pass statuses=['all'] for every status, or a specific subset."
+        " Optional quarter + domain filters."
+    ),
 )
-async def okr_list_active(quarter: str | None = None) -> list[dict[str, Any]]:
+async def okr_list_active(
+    quarter: str | None = None,
+    statuses: list[str] | None = None,
+    domain: str | None = None,
+) -> list[dict[str, Any]]:
     """Returns [{id, quarter, domain, status, confidence, krs: [...]}]."""
-    return [o.to_dict() for o in core_okr_list_active(quarter)]
+    objs = core_okr_list_active(quarter, statuses=statuses, domain=domain)
+    return [o.to_dict() for o in objs]
 
 
 @mcp.tool(

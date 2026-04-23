@@ -7,6 +7,7 @@ from rich.console import Console
 from mcs.commands.capture import capture_cmd
 from mcs.commands.daemon import app as daemon_app
 from mcs.commands.log import log_cmd
+from mcs.commands.okr import app as okr_app
 from mcs.commands.search import search_cmd
 from mcs.commands.show import show_cmd
 
@@ -38,6 +39,7 @@ app.command(name="capture", help="Capture a one-line memo to brain/.")(capture_c
 app.command(name="search", help="Hybrid search over brain/.")(search_cmd)
 app.command(name="show", help="Read a brain/ memo by id or path.")(show_cmd)
 app.command(name="log", help="Structured capture via template (interview, meeting, experiment).")(log_cmd)
+app.add_typer(okr_app, name="okr")
 app.add_typer(daemon_app, name="daemon")
 
 

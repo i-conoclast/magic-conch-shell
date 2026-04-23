@@ -211,11 +211,13 @@ def test_resolve_not_found_raises(tmp_brain: Path) -> None:
 
 
 def test_resolve_ambiguous_raises_with_candidates(tmp_brain: Path) -> None:
-    # Same slug in two locations.
+    # Same slug in two locations — use the stem from the capture so the
+    # test stays correct regardless of the calendar day it runs on.
     a = capture(text="in signals", title="dupe")
     b = capture(text="in career", domain="career", title="dupe")
+    assert a.path.stem == b.path.stem, "setup: both captures should share a slug"
     with pytest.raises(MemoAmbiguous) as info:
-        resolve_memo("2026-04-22-dupe")  # the title-based slug
+        resolve_memo(a.path.stem)
     assert len(info.value.candidates) == 2
     assert a.path in [p.resolve() for p in info.value.candidates]
     assert b.path in [p.resolve() for p in info.value.candidates]

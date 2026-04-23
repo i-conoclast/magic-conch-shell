@@ -260,14 +260,32 @@ def _find_kr_path(kr_id: str) -> Path:
 
 # ─── Public API — read ─────────────────────────────────────────────────
 
-def list_active(quarter: str | None = None) -> list[Objective]:
-    """Return every Objective with status != paused/abandoned.
+_DEFAULT_LIST_STATUSES = frozenset({"active", "achieved"})
 
-    `quarter` filters to a single quarter ('2026-Q2'). Omit for all quarters.
+
+def list_active(
+    quarter: str | None = None,
+    *,
+    statuses: Iterable[str] | None = None,
+    domain: str | None = None,
+) -> list[Objective]:
+    """Scan brain/objectives/ and return matching Objectives.
+
+    Default: status ∈ {active, achieved} (hides paused/abandoned so
+    "list" surfaces only what's in motion plus recent wins).
+    Pass `statuses={"all"}` to include every status, or an explicit
+    subset (e.g. {"paused"}) to filter precisely.
+    `domain` filters to a single domain; omit for all.
     """
     root = _objectives_root()
     if not root.exists():
         return []
+
+    allowed = (
+        _DEFAULT_LIST_STATUSES if statuses is None else frozenset(statuses)
+    )
+    include_all = "all" in allowed
+
     quarters: Iterable[Path]
     if quarter:
         _validate_quarter(quarter)
@@ -282,8 +300,11 @@ def list_active(quarter: str | None = None) -> list[Objective]:
             if not obj_file.exists():
                 continue
             obj = _load_objective_file(obj_file)
-            if obj.status in ("active", "achieved"):  # show closed successes too
-                out.append(obj)
+            if not include_all and obj.status not in allowed:
+                continue
+            if domain is not None and obj.domain != domain:
+                continue
+            out.append(obj)
     return out
 
 

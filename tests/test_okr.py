@@ -173,3 +173,32 @@ def test_list_active_quarter_filter(tmp_brain: Path) -> None:
 
 def test_list_active_empty_when_no_root(tmp_brain: Path) -> None:
     assert list_active() == []
+
+
+def test_list_active_all_statuses_includes_paused_and_abandoned(tmp_brain: Path) -> None:
+    a = create_objective(slug="a", quarter="2026-Q2", domain="ml")
+    b = create_objective(slug="b", quarter="2026-Q2", domain="ml")
+    c = create_objective(slug="c", quarter="2026-Q2", domain="ml")
+    from mcs.adapters.okr import update_objective
+    update_objective(b.id, status="paused")
+    update_objective(c.id, status="abandoned")
+
+    ids_all = {o.id for o in list_active(statuses=["all"])}
+    assert {a.id, b.id, c.id} == ids_all
+
+
+def test_list_active_explicit_status_subset(tmp_brain: Path) -> None:
+    a = create_objective(slug="a", quarter="2026-Q2", domain="ml")
+    b = create_objective(slug="b", quarter="2026-Q2", domain="ml")
+    from mcs.adapters.okr import update_objective
+    update_objective(b.id, status="paused")
+
+    only_paused = list_active(statuses=["paused"])
+    assert [o.id for o in only_paused] == [b.id]
+
+
+def test_list_active_domain_filter(tmp_brain: Path) -> None:
+    a = create_objective(slug="a", quarter="2026-Q2", domain="ml")
+    b = create_objective(slug="b", quarter="2026-Q2", domain="career")
+    result = list_active(domain="career")
+    assert [o.id for o in result] == [b.id]
