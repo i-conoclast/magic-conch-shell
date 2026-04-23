@@ -42,6 +42,7 @@ from mcs.adapters.okr import (
     OKRError,
     OKRNotFound,
     create_kr as core_create_kr,
+    current_quarter as core_current_quarter,
     get as core_get,
     list_active as core_list_active,
     update_kr as core_update_kr,
@@ -148,7 +149,13 @@ def _run(coro):
 
 @app.command("list")
 def list_cmd(
-    quarter: str | None = typer.Option(None, "-q", "--quarter", help="e.g. 2026-Q2"),
+    quarter: str | None = typer.Option(
+        None, "-q", "--quarter",
+        help=(
+            "Quarter to show, e.g. 2026-Q2."
+            " Default: current KST quarter. Use 'all' for every quarter."
+        ),
+    ),
     domain: str | None = typer.Option(
         None, "-d", "--domain", help=f"One of {sorted(DOMAINS)}."
     ),
@@ -156,12 +163,18 @@ def list_cmd(
         None,
         "-s",
         "--status",
-        help="active | paused | achieved | abandoned | all (default: active+achieved)",
+        help="active | paused | achieved | abandoned | all (default: active)",
     ),
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
     direct: bool = typer.Option(False, "--direct", help="Bypass the daemon."),
 ) -> None:
-    """List active + achieved Objectives (filters: quarter, domain, status)."""
+    """List active Objectives (defaults: current quarter · status=active)."""
+    # Quarter default: current KST quarter. `-q all` opts into every quarter.
+    if quarter is None:
+        quarter = core_current_quarter()
+    elif quarter.lower() == "all":
+        quarter = None
+
     statuses = [status] if status else None
     if status == "all":
         statuses = ["all"]

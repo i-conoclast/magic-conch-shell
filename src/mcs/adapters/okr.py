@@ -268,7 +268,14 @@ def _find_kr_path(kr_id: str) -> Path:
 
 # ─── Public API — read ─────────────────────────────────────────────────
 
-_DEFAULT_LIST_STATUSES = frozenset({"active", "achieved"})
+_DEFAULT_LIST_STATUSES = frozenset({"active"})
+
+
+def current_quarter(now: datetime | None = None) -> str:
+    """KST-today's quarter as 'YYYY-Q[1-4]'."""
+    n = now or datetime.now(KST)
+    q = (n.month - 1) // 3 + 1
+    return f"{n.year}-Q{q}"
 
 
 def list_active(
@@ -279,10 +286,10 @@ def list_active(
 ) -> list[Objective]:
     """Scan brain/objectives/ and return matching Objectives.
 
-    Default: status ∈ {active, achieved} (hides paused/abandoned so
-    "list" surfaces only what's in motion plus recent wins).
+    Default: status = {active} (hides achieved/paused/abandoned so
+    `list` shows only what's currently in motion).
     Pass `statuses={"all"}` to include every status, or an explicit
-    subset (e.g. {"paused"}) to filter precisely.
+    subset (e.g. {"achieved"}) to filter precisely.
     `domain` filters to a single domain; omit for all.
     """
     root = _objectives_root()
@@ -416,6 +423,14 @@ def update_kr(kr_id: str, **fields: Any) -> KeyResult:
     """Patch a KR's frontmatter fields and re-stamp updated_at.
 
     Accepted fields: text, target, current, unit, status, due, body.
+
+    When the caller does NOT set `status` explicitly, the KR's status
+    auto-transitions based on current/target:
+      - current >= target > 0     → achieved
+      - current > 0, was pending  → in_progress
+    Terminal statuses (achieved / missed / abandoned) are never
+    regressed — if a user wants to reopen a terminal KR they must
+    pass `status=...` explicitly.
     """
     path = _find_kr_path(kr_id)
     post = frontmatter.load(path)
@@ -434,6 +449,17 @@ def update_kr(kr_id: str, **fields: Any) -> KeyResult:
         if k in ("target", "current"):
             v = float(v)
         meta[k] = v
+
+    # Auto-transition status based on progress when caller didn't override it.
+    if "status" not in fields:
+        status = str(meta.get("status") or "pending")
+        if status not in _TERMINAL_KR_STATUSES:
+            current_v = float(meta.get("current") or 0)
+            target_v = float(meta.get("target") or 0)
+            if target_v > 0 and current_v >= target_v:
+                meta["status"] = "achieved"
+            elif current_v > 0 and status == "pending":
+                meta["status"] = "in_progress"
 
     meta["updated_at"] = _now()
 

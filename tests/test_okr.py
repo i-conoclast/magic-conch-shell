@@ -151,7 +151,9 @@ def test_update_objective_rejects_bad_status(tmp_brain: Path) -> None:
 
 # ─── list_active ───────────────────────────────────────────────────────
 
-def test_list_active_includes_active_and_achieved_only(tmp_brain: Path) -> None:
+def test_list_active_default_is_active_only(tmp_brain: Path) -> None:
+    """Default filter shows ONLY active Objectives — achieved/paused/abandoned
+    are hidden unless the caller opts in explicitly."""
     a = create_objective(slug="a", quarter="2026-Q2", domain="ml")
     b = create_objective(slug="b", quarter="2026-Q2", domain="ml")
     c = create_objective(slug="c", quarter="2026-Q2", domain="ml")
@@ -159,9 +161,7 @@ def test_list_active_includes_active_and_achieved_only(tmp_brain: Path) -> None:
     update_objective(c.id, status="achieved")
 
     ids = {o.id for o in list_active()}
-    assert a.id in ids
-    assert c.id in ids       # achieved still shown (recent wins)
-    assert b.id not in ids   # paused hidden
+    assert ids == {a.id}
 
 
 def test_list_active_quarter_filter(tmp_brain: Path) -> None:
@@ -273,3 +273,63 @@ def test_kr_status_accepts_abandoned(tmp_brain: Path) -> None:
     k = create_kr(obj.id, text="x", status="in_progress")
     updated = update_kr(k.id, status="abandoned")
     assert updated.status == "abandoned"
+
+
+# ─── auto-transition on update_kr ──────────────────────────────────────
+
+def test_update_kr_auto_promotes_to_achieved_when_target_met(
+    tmp_brain: Path,
+) -> None:
+    obj = create_objective(slug="p-ach", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="do 1 thing", target=1, current=0, status="pending")
+    out = update_kr(k.id, current=1)     # no explicit status
+    assert out.status == "achieved"
+    assert out.current == 1.0
+
+
+def test_update_kr_auto_promotes_to_in_progress_on_nonzero_current(
+    tmp_brain: Path,
+) -> None:
+    obj = create_objective(slug="p-ip", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="multi step", target=5, current=0, status="pending")
+    out = update_kr(k.id, current=2)
+    assert out.status == "in_progress"
+    assert out.current == 2.0
+
+
+def test_update_kr_does_not_regress_terminal_status(tmp_brain: Path) -> None:
+    """Current going back to 0 should NOT move a terminal KR back to pending."""
+    obj = create_objective(slug="p-noreg", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="t", target=1, current=1, status="achieved")
+    out = update_kr(k.id, current=0)
+    assert out.status == "achieved"   # terminal — sticky
+
+
+def test_update_kr_respects_explicit_status(tmp_brain: Path) -> None:
+    """Caller-supplied status wins over auto-transition."""
+    obj = create_objective(slug="p-exp", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="t", target=1, current=0, status="pending")
+    # User hits the target but marks missed instead of achieved.
+    out = update_kr(k.id, current=1, status="missed")
+    assert out.status == "missed"
+
+
+def test_update_kr_no_current_change_no_auto_transition(tmp_brain: Path) -> None:
+    obj = create_objective(slug="p-nochg", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="t", target=1, current=0, status="pending")
+    out = update_kr(k.id, text="renamed")    # only text — status stays pending
+    assert out.status == "pending"
+
+
+# ─── current_quarter helper ────────────────────────────────────────────
+
+def test_current_quarter_computes_from_kst_month() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from mcs.adapters.okr import current_quarter
+
+    kst = ZoneInfo("Asia/Seoul")
+    assert current_quarter(datetime(2026, 1, 5, tzinfo=kst)) == "2026-Q1"
+    assert current_quarter(datetime(2026, 4, 23, tzinfo=kst)) == "2026-Q2"
+    assert current_quarter(datetime(2026, 7, 1, tzinfo=kst)) == "2026-Q3"
+    assert current_quarter(datetime(2026, 12, 31, tzinfo=kst)) == "2026-Q4"
