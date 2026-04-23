@@ -29,6 +29,14 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mcs.adapters.daemon_client import DaemonUnreachable, call_tool
+from mcs.adapters.hermes_client import (
+    HermesAuthError,
+    HermesError,
+    HermesUnreachable,
+    intake_session_name,
+    run_skill,
+    update_session_name,
+)
 from mcs.adapters.memory import DOMAINS
 from mcs.adapters.okr import (
     OKRError,
@@ -261,16 +269,52 @@ def show_cmd(
 
 @app.command("update")
 def update_cmd(
-    kr_id: str = typer.Argument(..., help="e.g. 2026-Q2-career-mle-role.kr-2"),
+    id: str = typer.Argument(
+        ...,
+        help=(
+            "KR id (e.g. 2026-Q2-career-mle-role.kr-2) for mechanical patch, "
+            "or Objective id + --interactive for Hermes-driven review."
+        ),
+    ),
     text: str | None = typer.Option(None, "--text"),
     target: float | None = typer.Option(None, "--target"),
     current: float | None = typer.Option(None, "--current"),
     unit: str | None = typer.Option(None, "--unit"),
     status: str | None = typer.Option(None, "--status"),
     due: str | None = typer.Option(None, "--due", help="ISO date, e.g. 2026-06-30"),
+    interactive: bool = typer.Option(
+        False,
+        "-i",
+        "--interactive",
+        help="Route to Hermes okr-update skill (dialogue). Id must be an Objective id.",
+    ),
     direct: bool = typer.Option(False, "--direct"),
 ) -> None:
-    """Patch KR fields. Shows a before/after diff."""
+    """Patch KR fields (mechanical) or run an interactive OKR review."""
+    if interactive:
+        if ".kr-" in id:
+            console.print(
+                "[red]✗[/red] --interactive expects an Objective id, not a KR id."
+            )
+            raise typer.Exit(code=2)
+        session = update_session_name(id)
+        _run_agent_repl(
+            "okr-update",
+            session=session,
+            opener=id,            # skill reads the Objective id from opener
+            greeting_hint=f"reviewing {id}",
+        )
+        return
+
+    # Mechanical path requires a KR id.
+    if ".kr-" not in id:
+        console.print(
+            "[red]✗[/red] mechanical update needs a KR id "
+            "(use -i/--interactive for Objective-level review)."
+        )
+        raise typer.Exit(code=2)
+    kr_id = id
+
     # Fetch before for diff
     parent = kr_id.rsplit(".kr-", 1)[0]
     before_obj = _run(_fetch_get(parent, direct))
@@ -386,6 +430,101 @@ def kr_add_cmd(
     console.print(f"  [dim]status :[/dim] {out['status']}")
     if out.get("due"):
         console.print(f"  [dim]due    :[/dim] {out['due']}")
+
+
+# ─── agent REPL (shared by `new` + `update --interactive`) ────────────
+
+_EXIT_WORDS = frozenset({"quit", "exit", "q", "그만", "나갈게", "끝"})
+
+
+def _run_agent_repl(
+    skill: str,
+    *,
+    session: str,
+    opener: str | None,
+    greeting_hint: str | None = None,
+) -> None:
+    """Drive a multi-turn conversation with a Hermes skill.
+
+    The loop blocks on user input, posts each message to
+    `/v1/responses` with a fixed `conversation` name, and prints the
+    assistant's reply. Empty input, Ctrl-C, or an exit word terminates
+    the loop; whatever was already persisted by the skill stays.
+    """
+    console.print(f"[dim]session:[/dim] [cyan]{session}[/cyan]")
+    if greeting_hint:
+        console.print(f"[dim]{greeting_hint}[/dim]")
+    console.print(
+        "[dim]empty line or 'quit' to end · the skill saves as it goes.[/dim]\n"
+    )
+
+    user_msg = opener
+
+    while True:
+        if not user_msg:
+            try:
+                user_msg = typer.prompt("you", default="", show_default=False)
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[dim]ended.[/dim]")
+                return
+
+        if not user_msg.strip() or user_msg.strip().lower() in _EXIT_WORDS:
+            console.print("[dim]ended.[/dim]")
+            return
+
+        try:
+            result = asyncio.run(
+                run_skill(skill=skill, opener=user_msg, conversation=session)
+            )
+        except HermesUnreachable as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=3) from e
+        except HermesAuthError as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=4) from e
+        except HermesError as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=1) from e
+        except KeyboardInterrupt:
+            console.print("\n[dim]interrupted — partial state saved.[/dim]")
+            return
+
+        reply = (result.get("text") or "").strip()
+        if reply:
+            console.print(f"\n[bold cyan]conch[/bold cyan]\n{reply}\n")
+        else:
+            console.print("[dim](no visible reply — skill may have ended silently)[/dim]")
+
+        user_msg = None  # next iteration prompts
+
+
+# ─── new (agent — okr-intake skill) ────────────────────────────────────
+
+@app.command("new")
+def new_cmd(
+    opener: str | None = typer.Argument(
+        None,
+        help="Opening message to start the intake, e.g. '커리어 OKR 하나 세우자'.",
+    ),
+    resume: str | None = typer.Option(
+        None,
+        "--resume",
+        help="Continue an existing intake session by name.",
+    ),
+) -> None:
+    """Start a new OKR intake conversation (agent-driven via Hermes)."""
+    if resume:
+        session = resume
+        hint = f"resuming · type to continue"
+    else:
+        session = intake_session_name()
+        hint = "new intake session"
+    _run_agent_repl(
+        "okr-intake",
+        session=session,
+        opener=opener,
+        greeting_hint=hint,
+    )
 
 
 # ─── kr-list ────────────────────────────────────────────────────────────
