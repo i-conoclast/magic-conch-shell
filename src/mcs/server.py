@@ -22,8 +22,10 @@ from mcs.adapters.memory import (
     DOMAINS,
     MemoAmbiguous,
     MemoNotFound,
+    add_okr_link as core_add_okr_link,
     capture as core_capture,
     capture_structured as core_capture_structured,
+    list_captures_by_date as core_list_captures_by_date,
     load_memo,
 )
 from mcs.adapters.okr import (
@@ -415,6 +417,44 @@ async def memory_templates_list() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+@mcp.tool(
+    name="memory.list_captures",
+    description=(
+        "List captures (signals + notes) whose frontmatter created_at "
+        "falls on a given KST date. Used by capture-progress-sync to "
+        "cross-reference the day's memos against active KRs."
+    ),
+)
+async def memory_list_captures(
+    date: str,
+    domain: str | None = None,
+    types: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        rows = core_list_captures_by_date(date, domain=domain, types=types)
+    except ValueError as e:
+        return [{"error": str(e)}]
+    return [r.to_dict() for r in rows]
+
+
+@mcp.tool(
+    name="memory.add_okr_link",
+    description=(
+        "Append kr ids to a capture's frontmatter `okrs:` field. "
+        "Idempotent — existing links stay and duplicates are deduped. "
+        "Returns the resulting full okrs list or {error}."
+    ),
+)
+async def memory_add_okr_link(
+    capture_id: str, kr_ids: list[str]
+) -> dict[str, Any]:
+    try:
+        merged = core_add_okr_link(capture_id, kr_ids)
+    except (MemoNotFound, MemoAmbiguous) as e:
+        return {"error": str(e)}
+    return {"okrs": merged}
 
 
 @mcp.tool(

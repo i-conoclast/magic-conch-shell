@@ -9,7 +9,9 @@ import pytest
 from mcs.adapters.memory import (
     MemoAmbiguous,
     MemoNotFound,
+    add_okr_link,
     capture,
+    list_captures_by_date,
     load_memo,
     resolve_memo,
     supplement_frontmatter,
@@ -268,3 +270,77 @@ def test_load_memo_parses_frontmatter_and_body(tmp_brain: Path) -> None:
     assert memo.entities == ["people/jane-smith"]
     assert "body line 1" in memo.body
     assert memo.source == "typed"
+
+
+# ─── list_captures_by_date / add_okr_link ──────────────────────────────
+
+def test_list_captures_by_date_filters_to_date(tmp_brain: Path) -> None:
+    """Only captures whose created_at starts with the given date are returned."""
+    today = capture(text="today signal")
+    today_note = capture(text="today note", domain="ml")
+    # Force an old capture by rewriting created_at.
+    old = capture(text="yesterday signal")
+    post = frontmatter.load(old.path)
+    meta = dict(post.metadata)
+    meta["created_at"] = "2026-04-01T09:00:00+09:00"
+    post = frontmatter.Post(post.content, **meta)
+    old.path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
+
+    # Today's date from the just-created signal
+    today_meta = frontmatter.load(today.path).metadata
+    today_date = str(today_meta["created_at"])[:10]
+
+    rows = list_captures_by_date(today_date)
+    ids = {r.id for r in rows}
+    assert today.path.stem in ids
+    assert today_note.path.stem in ids
+    assert old.path.stem not in ids
+
+
+def test_list_captures_by_date_domain_filter(tmp_brain: Path) -> None:
+    capture(text="ml note", domain="ml")
+    capture(text="career note", domain="career")
+    today_date = _read_meta(
+        capture(text="signal").path   # any fresh capture
+    )["created_at"][:10]
+    rows_ml = list_captures_by_date(today_date, domain="ml")
+    assert all(r.domain == "ml" for r in rows_ml)
+
+
+def test_list_captures_by_date_invalid_date_raises(tmp_brain: Path) -> None:
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        list_captures_by_date("2026/04/23")
+
+
+def test_list_captures_excludes_missing_dir(tmp_brain: Path) -> None:
+    """brain/signals or brain/domains may not exist yet — don't crash."""
+    today_date = "2026-04-23"
+    rows = list_captures_by_date(today_date)
+    assert rows == []
+
+
+def test_add_okr_link_appends_deduped(tmp_brain: Path) -> None:
+    r = capture(text="linked memo", domain="ml")
+    result = add_okr_link(r.path.stem, ["2026-Q2-mle-role.kr-1"])
+    assert result == ["2026-Q2-mle-role.kr-1"]
+    # Adding same + a new one: dedup + append
+    result2 = add_okr_link(
+        r.path.stem,
+        ["2026-Q2-mle-role.kr-1", "2026-Q2-mle-role.kr-2"],
+    )
+    assert result2 == ["2026-Q2-mle-role.kr-1", "2026-Q2-mle-role.kr-2"]
+
+
+def test_add_okr_link_preserves_existing_field(tmp_brain: Path) -> None:
+    r = capture(
+        text="already linked",
+        domain="ml",
+        okrs=["2026-Q2-x.kr-1"],
+    )
+    result = add_okr_link(r.path.stem, ["2026-Q2-x.kr-2"])
+    assert result == ["2026-Q2-x.kr-1", "2026-Q2-x.kr-2"]
+
+
+def test_add_okr_link_missing_capture_raises(tmp_brain: Path) -> None:
+    with pytest.raises(MemoNotFound):
+        add_okr_link("2026-99-99-nope", ["x.kr-1"])

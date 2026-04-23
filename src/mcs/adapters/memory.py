@@ -188,6 +188,141 @@ def load_memo(query: str) -> ResolvedMemo:
     )
 
 
+@dataclass
+class CaptureSummary:
+    """Lightweight view of a capture for list/sync flows."""
+
+    id: str
+    path: Path
+    rel_path: str
+    type: str
+    domain: str | None
+    created_at: str
+    entities: list[str]
+    okrs: list[str]
+    excerpt: str   # first non-empty content line, trimmed to 160 chars
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "path": str(self.path),
+            "rel_path": self.rel_path,
+            "type": self.type,
+            "domain": self.domain,
+            "created_at": self.created_at,
+            "entities": self.entities,
+            "okrs": self.okrs,
+            "excerpt": self.excerpt,
+        }
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def list_captures_by_date(
+    date: str,
+    *,
+    domain: str | None = None,
+    types: Iterable[str] | None = None,
+) -> list[CaptureSummary]:
+    """Return capture summaries whose frontmatter `created_at` falls on `date`.
+
+    Args:
+        date:    KST date string 'YYYY-MM-DD'.
+        domain:  Optional frontmatter domain filter.
+        types:   Optional type whitelist (default: {'signal', 'note'}).
+
+    Scans brain/signals/ + brain/domains/ only — the capture surfaces
+    we actually expect end-user memos in.
+    """
+    if not _DATE_RE.match(date):
+        raise ValueError(f"date must be 'YYYY-MM-DD', got {date!r}")
+
+    wanted_types = set(types) if types else {"signal", "note"}
+
+    settings = load_settings()
+    brain = settings.brain_dir.resolve()
+    repo_root = settings.repo_root.resolve()
+
+    roots = [brain / "signals"] + [brain / "domains" / d for d in sorted(DOMAINS)]
+
+    out: list[CaptureSummary] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.glob("*.md")):
+            try:
+                post = frontmatter.load(path)
+            except Exception:
+                continue
+            meta = post.metadata or {}
+            created = str(meta.get("created_at") or "")
+            if not created.startswith(date):
+                continue
+            row_type = str(meta.get("type") or "")
+            if wanted_types and row_type not in wanted_types:
+                continue
+            row_domain = meta.get("domain")
+            if domain is not None and row_domain != domain:
+                continue
+
+            try:
+                rel = str(path.resolve().relative_to(repo_root))
+            except ValueError:
+                rel = str(path)
+
+            body = (post.content or "").strip()
+            first_line = next(
+                (ln.strip() for ln in body.splitlines() if ln.strip()),
+                "",
+            )
+            excerpt = first_line[:160] + ("…" if len(first_line) > 160 else "")
+
+            out.append(
+                CaptureSummary(
+                    id=str(meta.get("id") or path.stem),
+                    path=path.resolve(),
+                    rel_path=rel,
+                    type=row_type,
+                    domain=row_domain if row_domain is not None else None,
+                    created_at=created,
+                    entities=list(meta.get("entities") or []),
+                    okrs=list(meta.get("okrs") or []),
+                    excerpt=excerpt,
+                )
+            )
+    return out
+
+
+def add_okr_link(capture_id: str, kr_ids: Iterable[str]) -> list[str]:
+    """Append kr_ids to a capture's frontmatter `okrs` field.
+
+    Idempotent: existing links are preserved, duplicates are deduped.
+    Returns the resulting full okrs list.
+    """
+    to_add = [s.strip() for s in kr_ids if s and s.strip()]
+    if not to_add:
+        # Still need to locate the capture even if no new links — fail loudly
+        # when the capture doesn't exist so callers get a clear error.
+        resolve_memo(capture_id)
+        return []
+
+    path = resolve_memo(capture_id)
+    post = frontmatter.load(path)
+    meta = dict(post.metadata or {})
+    existing = list(meta.get("okrs") or [])
+    merged: list[str] = list(existing)
+    for kr in to_add:
+        if kr not in merged:
+            merged.append(kr)
+    meta["okrs"] = merged
+    path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+        encoding="utf-8",
+    )
+    return merged
+
+
 def _infer_type_and_domain(brain: Path, path: Path) -> tuple[str, str | None]:
     """Derive (type, domain) from a file's location under brain/.
 
