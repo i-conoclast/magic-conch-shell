@@ -59,6 +59,7 @@ _KR_SYMBOL = {
     "in_progress": "◐",
     "achieved": "✓",
     "missed": "✗",
+    "abandoned": "⊘",
 }
 _KR_UNACHIEVED = frozenset({"pending", "in_progress"})
 
@@ -537,10 +538,17 @@ def kr_list_cmd(
     ),
     status: str | None = typer.Option(
         None, "-s", "--status",
-        help="pending | in_progress | achieved | missed | all (default: unachieved)",
+        help=(
+            "pending | in_progress | achieved | missed | abandoned | all"
+            " (default: unachieved)"
+        ),
     ),
     due_before: str | None = typer.Option(
         None, "--due-before", help="ISO date; KRs with due ≤ this only."
+    ),
+    include_closed: bool = typer.Option(
+        False, "--include-closed",
+        help="Also include KRs under paused/achieved/abandoned Objectives.",
     ),
     as_json: bool = typer.Option(False, "--json"),
     direct: bool = typer.Option(False, "--direct"),
@@ -552,9 +560,16 @@ def kr_list_cmd(
         if "error" in obj:
             console.print(f"[red]✗[/red] {obj['error']}")
             raise typer.Exit(code=4)
+        if not include_closed and obj.get("status") != "active":
+            console.print(
+                f"[dim]{objective_id} is {obj.get('status')}; use --include-closed.[/dim]"
+            )
+            raise typer.Exit(code=0)
         krs: list[dict[str, Any]] = list(obj.get("krs") or [])
     else:
         objs = _run(_fetch_list(None, ["all"], None, direct))
+        if not include_closed:
+            objs = [o for o in objs if o.get("status") == "active"]
         krs = []
         for o in objs:
             krs.extend(o.get("krs") or [])

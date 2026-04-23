@@ -202,3 +202,74 @@ def test_list_active_domain_filter(tmp_brain: Path) -> None:
     b = create_objective(slug="b", quarter="2026-Q2", domain="career")
     result = list_active(domain="career")
     assert [o.id for o in result] == [b.id]
+
+
+# ─── cascade on close ──────────────────────────────────────────────────
+
+def test_achieved_cascades_remaining_krs_to_achieved(tmp_brain: Path) -> None:
+    from mcs.adapters.okr import update_objective
+    obj = create_objective(slug="c-a", quarter="2026-Q2", domain="ml")
+    k_done = create_kr(obj.id, text="already done", status="achieved", current=1, target=1)
+    k_progress = create_kr(obj.id, text="mid-flight", status="in_progress")
+    k_pending = create_kr(obj.id, text="not yet", status="pending")
+
+    update_objective(obj.id, status="achieved")
+
+    reloaded = get(obj.id)
+    status_by_id = {k.id: k.status for k in reloaded.krs}
+    assert status_by_id[k_done.id] == "achieved"       # unchanged
+    assert status_by_id[k_progress.id] == "achieved"   # cascaded
+    assert status_by_id[k_pending.id] == "achieved"    # cascaded
+
+
+def test_abandoned_cascades_to_abandoned(tmp_brain: Path) -> None:
+    from mcs.adapters.okr import update_objective
+    obj = create_objective(slug="c-b", quarter="2026-Q2", domain="ml")
+    k_done = create_kr(obj.id, text="done", status="achieved", current=1, target=1)
+    k_mid = create_kr(obj.id, text="mid", status="in_progress")
+
+    update_objective(obj.id, status="abandoned")
+
+    reloaded = get(obj.id)
+    status_by_id = {k.id: k.status for k in reloaded.krs}
+    assert status_by_id[k_done.id] == "achieved"       # terminal untouched
+    assert status_by_id[k_mid.id] == "abandoned"
+
+
+def test_paused_does_not_cascade(tmp_brain: Path) -> None:
+    from mcs.adapters.okr import update_objective
+    obj = create_objective(slug="c-p", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="keep", status="in_progress")
+    update_objective(obj.id, status="paused")
+    reloaded = get(obj.id)
+    assert reloaded.krs[0].status == "in_progress"  # unchanged
+
+
+def test_cascade_skips_terminal_krs(tmp_brain: Path) -> None:
+    """Already-missed KRs should not be forced to 'achieved'."""
+    from mcs.adapters.okr import update_objective
+    obj = create_objective(slug="c-t", quarter="2026-Q2", domain="ml")
+    k_missed = create_kr(obj.id, text="missed", status="missed")
+    k_pending = create_kr(obj.id, text="pending", status="pending")
+    update_objective(obj.id, status="achieved")
+    reloaded = get(obj.id)
+    by = {k.id: k.status for k in reloaded.krs}
+    assert by[k_missed.id] == "missed"         # terminal, not overwritten
+    assert by[k_pending.id] == "achieved"
+
+
+def test_cascade_only_on_status_transition(tmp_brain: Path) -> None:
+    """Setting status=active again on an active objective does nothing."""
+    from mcs.adapters.okr import update_objective
+    obj = create_objective(slug="c-n", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="k", status="in_progress")
+    update_objective(obj.id, status="active")   # no change
+    assert get(obj.id).krs[0].status == "in_progress"
+
+
+def test_kr_status_accepts_abandoned(tmp_brain: Path) -> None:
+    from mcs.adapters.okr import update_kr
+    obj = create_objective(slug="c-d", quarter="2026-Q2", domain="ml")
+    k = create_kr(obj.id, text="x", status="in_progress")
+    updated = update_kr(k.id, status="abandoned")
+    assert updated.status == "abandoned"

@@ -34,8 +34,16 @@ KST = ZoneInfo("Asia/Seoul")
 # ─── Valid enum domains ─────────────────────────────────────────────────
 
 _OBJECTIVE_STATUSES = frozenset({"active", "paused", "achieved", "abandoned"})
-_KR_STATUSES = frozenset({"pending", "in_progress", "achieved", "missed"})
+_KR_STATUSES = frozenset({"pending", "in_progress", "achieved", "missed", "abandoned"})
 _KR_UNITS = frozenset({"count", "percent", "currency", "binary"})
+
+# When an Objective closes, its remaining KRs cascade to a matching terminal state.
+# paused is not a close — KRs stay as-is.
+_OBJECTIVE_TO_KR_CASCADE = {
+    "achieved": "achieved",
+    "abandoned": "abandoned",
+}
+_TERMINAL_KR_STATUSES = frozenset({"achieved", "missed", "abandoned"})
 
 
 # ─── Errors ─────────────────────────────────────────────────────────────
@@ -440,10 +448,17 @@ def update_kr(kr_id: str, **fields: Any) -> KeyResult:
 
 
 def update_objective(objective_id: str, **fields: Any) -> Objective:
-    """Patch an objective's top-level fields (not KRs)."""
+    """Patch an objective's top-level fields.
+
+    When status transitions to `achieved` or `abandoned`, every KR still in
+    a non-terminal state (pending / in_progress) is cascaded to the matching
+    terminal status so kr-list and future reports stay consistent with the
+    Objective's closure. `paused` does NOT cascade — pauses are temporary.
+    """
     path = _find_objective_path(objective_id)
     post = frontmatter.load(path)
     meta = dict(post.metadata or {})
+    prev_status = str(meta.get("status") or "active")
 
     allowed = {"status", "confidence", "domain", "entities"}
     for k, v in fields.items():
@@ -468,7 +483,30 @@ def update_objective(objective_id: str, **fields: Any) -> Objective:
         frontmatter.dumps(frontmatter.Post(body, **meta)) + "\n",
         encoding="utf-8",
     )
+
+    # Cascade close → KR terminal state, only on status transitions we map.
+    new_status = str(meta.get("status") or "active")
+    cascade_to = _OBJECTIVE_TO_KR_CASCADE.get(new_status)
+    if cascade_to and new_status != prev_status:
+        _cascade_kr_status(path.parent, cascade_to)
+
     return _load_objective_file(path)
+
+
+def _cascade_kr_status(folder: Path, target_status: str) -> None:
+    """Set each non-terminal KR under `folder` to `target_status`."""
+    for kr_path in sorted(folder.glob("kr-*.md")):
+        post = frontmatter.load(kr_path)
+        meta = dict(post.metadata or {})
+        current = str(meta.get("status") or "pending")
+        if current in _TERMINAL_KR_STATUSES:
+            continue  # don't overwrite already-decided KRs
+        meta["status"] = target_status
+        meta["updated_at"] = _now()
+        kr_path.write_text(
+            frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+            encoding="utf-8",
+        )
 
 
 def _touch_parent(obj_path: Path) -> None:
