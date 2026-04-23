@@ -35,6 +35,7 @@ from mcs.adapters.hermes_client import (
     HermesUnreachable,
     intake_session_name,
     run_skill,
+    sync_session_name,
     update_session_name,
 )
 from mcs.adapters.memory import DOMAINS
@@ -510,6 +511,38 @@ def _run_agent_repl(
             console.print("[dim](no visible reply — skill may have ended silently)[/dim]")
 
         user_msg = None  # next iteration prompts
+
+
+# ─── sync (agent — capture-progress-sync skill) ────────────────────────
+
+@app.command("sync")
+def sync_cmd(
+    date: str | None = typer.Argument(
+        None,
+        help="KST date (YYYY-MM-DD). Default: today.",
+    ),
+    resume: bool = typer.Option(
+        False, "--resume",
+        help=(
+            "Resume the same-day session explicitly. Default is already"
+            " deterministic per date, so this is rarely needed."
+        ),
+    ),
+) -> None:
+    """Run capture-progress-sync: cross-reference today's captures with active KRs."""
+    session = sync_session_name(date)
+    # Always pass a non-empty opener so the first turn fires the skill
+    # immediately instead of dropping the user straight into a blank prompt.
+    opener = date if date else "today"
+    hint = f"date = {date or 'today (KST)'}"
+    if resume:
+        hint += " · resuming"
+    _run_agent_repl(
+        "capture-progress-sync",
+        session=session,
+        opener=opener,
+        greeting_hint=hint,
+    )
 
 
 # ─── new (agent — okr-intake skill) ────────────────────────────────────

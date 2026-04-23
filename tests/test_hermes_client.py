@@ -52,6 +52,17 @@ def test_brief_session_accepts_explicit_date() -> None:
     assert brief_session_name(date="2026-05-01") == "morning-brief-2026-05-01"
 
 
+def test_sync_session_uses_today_by_default() -> None:
+    from mcs.adapters.hermes_client import sync_session_name
+    now = datetime(2026, 4, 23, 22, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    assert sync_session_name(now=now) == "capture-progress-sync-2026-04-23"
+
+
+def test_sync_session_accepts_explicit_date() -> None:
+    from mcs.adapters.hermes_client import sync_session_name
+    assert sync_session_name(date="2026-04-22") == "capture-progress-sync-2026-04-22"
+
+
 # ─── gateway_url ────────────────────────────────────────────────────────
 
 def test_gateway_url_defaults(monkeypatch: pytest.MonkeyPatch) -> None:

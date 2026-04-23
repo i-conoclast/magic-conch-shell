@@ -95,6 +95,18 @@ def brief_session_name(date: str | None = None, *, now: datetime | None = None) 
     return f"morning-brief-{n.strftime('%Y-%m-%d')}"
 
 
+def sync_session_name(date: str | None = None, *, now: datetime | None = None) -> str:
+    """Per-day session for capture-progress-sync.
+
+    Same-day re-invocation resumes the batch so partially-approved
+    updates aren't re-proposed; next calendar day starts fresh.
+    """
+    if date:
+        return f"capture-progress-sync-{date}"
+    n = now or datetime.now(_KST)
+    return f"capture-progress-sync-{n.strftime('%Y-%m-%d')}"
+
+
 # ─── Response extraction ───────────────────────────────────────────────
 
 def _extract_text(data: dict[str, Any]) -> str:
