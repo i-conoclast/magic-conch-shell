@@ -35,24 +35,90 @@
 
 ---
 
-## 현재 사용 가능한 CLI (Day 7 기준)
+## 현재 사용 가능한 CLI (Day 10 기준)
 
+### 데몬 (MCP HTTP 서버 — Milvus 소유자 + 내장 watcher)
 ```bash
-# 데몬 (MCP HTTP 서버, Milvus 소유자 + 내장 watcher)
 mcs daemon start --daemon   # 백그라운드
-mcs daemon status           # 상태·pid·포트 확인
+mcs daemon status           # pid·포트 확인
 mcs daemon stop
+```
 
-# 메모 캡처 (기본: 데몬 경유, --direct로 우회 가능)
+### 캡처 — 자유 메모 + 구조화 기록
+```bash
+# 자유 메모 (FR-A1)
 mcs capture "가벼운 한 줄"                      # signals/
 mcs capture "면접 정리" -d career -e people/jane-smith
 mcs capture "..." -t "anthropic-mle-1st-round"  # slug 지정
 
-# 검색
+# 구조화 기록 (FR-A2 — 템플릿 기반)
+mcs log                                         # 사용 가능한 템플릿 목록
+mcs log interview-note                          # 대화형 필드 입력
+mcs log interview-note -f company=companies/anthropic -f round=1차
+```
+
+### 조회
+```bash
 mcs search "면접"                               # 하이브리드 (vector + keyword)
 mcs search "LoRA" -d ml -n 5                    # 도메인 필터
 mcs search "..." -e people/jane-smith --json    # 엔티티 후처리 + JSON
+
+mcs show 2026-04-20-anthropic-mle-1st           # 본문 + frontmatter (slug)
+mcs show signals/2026-04-22-foo --json          # 경로 형태도 허용
 ```
+
+### OKR — planning SSoT
+```bash
+# Agent-driven (Hermes skill 대화형)
+mcs okr new "커리어 OKR 하나 세우자"            # okr-intake 스킬 REPL
+mcs okr new --resume okr-intake-YYYYMMDD-HHMMSS # 중단된 인테이크 재개
+mcs okr update 2026-Q2-career-mle-role -i       # okr-update 주간 체크인
+
+# Mechanical (데이터만, Hermes 거치지 않음)
+mcs okr list                                    # 활성 + 달성 OKR 테이블
+mcs okr list -q 2026-Q2 -d career
+mcs okr show 2026-Q2-career-mle-role            # KR 포함 상세
+mcs okr update <kr-id> --current 1 --status achieved
+mcs okr close 2026-Q2-career-mle-role --note "Offer 수락"
+mcs okr kr-add <obj-id> --text "연봉 협상" --target 1 --due 2026-06-30
+mcs okr kr-list --due-before 2026-05-15         # 마감 임박
+```
+
+### 공통 옵션
+- `--json` — 모든 조회 명령
+- `--direct` — mcs 데몬 우회 (디버깅·오프라인)
 
 **파일 watcher**: 데몬이 떠 있으면 `brain/signals/` 또는 `brain/domains/X/`에
 외부 에디터로 `.md` 파일 저장만 해도 frontmatter 자동 보충 + 인덱싱.
+
+---
+
+## 아키텍처 요약
+
+```
+Hermes (agent runtime, :8642)              mcs daemon (data, :18342)
+  ├─ LLM: Codex gpt-5.4 기본                ├─ 16개 MCP 도구
+  │        Ollama qwen3.6 fallback          │   (memory, okr, templates)
+  ├─ skills/planner/* 에서 대화 구동        ├─ 하이브리드 검색 (Milvus + bge-m3)
+  └─ mcs MCP 도구 호출로 데이터 접근        └─ brain/ 파일 watcher
+                  ▲
+                  │
+  mcs CLI ────────┤
+     mechanical → mcs daemon (HTTP MCP)
+     agent      → Hermes gateway (/v1/responses)
+```
+
+- **mcs** = 데이터 레이어. 메모·엔티티·OKR 저장·검색·재조합.
+- **Hermes** = 에이전트 런타임. 모든 LLM 호출·대화·스킬 실행.
+- **Brain (`brain/`)** = 마크다운 SSoT. 다른 도구로도 편집 가능.
+
+Hermes 설정 (`~/.hermes/config.yaml`)에 필요한 것:
+- `skills.external_dirs: [~/Documents/GitHub/magic-conch-shell/skills]`
+- `mcp_servers.mcs: {url: "http://127.0.0.1:18342/mcp/"}`
+- `fallback_model: {provider: custom, base_url: "http://127.0.0.1:11434/v1", model: qwen3.6:35b-a3b-mxfp8}`
+
+그리고 `~/.hermes/.env` 에:
+- `API_SERVER_ENABLED=true`
+- `API_SERVER_KEY=<랜덤>`
+
+`hermes gateway run` 으로 API 서버 기동.
