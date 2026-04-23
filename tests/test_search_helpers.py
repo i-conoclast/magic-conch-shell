@@ -50,10 +50,16 @@ def test_strip_frontmatter_only_removes_leading_block() -> None:
 
 
 # ─── _prefix_for ────────────────────────────────────────────────────────
+#
+# Domain no longer drives the path prefix — it's enforced via frontmatter
+# so Objectives / KRs / signals tagged with the domain all surface. The
+# prefix is kept only as a speed hint for `type` values that map cleanly
+# to a single folder.
 
-def test_prefix_for_domain_points_at_domain_folder(tmp_path: Path) -> None:
-    prefix = _prefix_for(tmp_path, domain="career", type_=None)
-    assert prefix == str(tmp_path / "domains" / "career")
+
+def test_prefix_for_domain_alone_returns_none(tmp_path: Path) -> None:
+    """Domain filtering happens in frontmatter, not via path prefix."""
+    assert _prefix_for(tmp_path, domain="career", type_=None) is None
 
 
 def test_prefix_for_signal_type_points_at_signals(tmp_path: Path) -> None:
@@ -62,9 +68,20 @@ def test_prefix_for_signal_type_points_at_signals(tmp_path: Path) -> None:
     )
 
 
-def test_prefix_for_note_type_points_at_all_domains(tmp_path: Path) -> None:
-    assert _prefix_for(tmp_path, domain=None, type_="note") == str(
-        tmp_path / "domains"
+def test_prefix_for_note_type_returns_none(tmp_path: Path) -> None:
+    """note spans brain/domains/* so there's no single tight prefix."""
+    assert _prefix_for(tmp_path, domain=None, type_="note") is None
+
+
+def test_prefix_for_objective_points_at_objectives(tmp_path: Path) -> None:
+    assert _prefix_for(tmp_path, domain=None, type_="objective") == str(
+        tmp_path / "objectives"
+    )
+
+
+def test_prefix_for_kr_points_at_objectives(tmp_path: Path) -> None:
+    assert _prefix_for(tmp_path, domain=None, type_="kr") == str(
+        tmp_path / "objectives"
     )
 
 
@@ -72,10 +89,10 @@ def test_prefix_for_no_filters_returns_none(tmp_path: Path) -> None:
     assert _prefix_for(tmp_path, domain=None, type_=None) is None
 
 
-def test_prefix_for_domain_wins_over_type(tmp_path: Path) -> None:
-    """Domain is more specific; type is ignored when both are set."""
+def test_prefix_for_type_wins_domain_ignored(tmp_path: Path) -> None:
+    """Domain is always ignored in the prefix — type alone decides."""
     prefix = _prefix_for(tmp_path, domain="ml", type_="signal")
-    assert prefix == str(tmp_path / "domains" / "ml")
+    assert prefix == str(tmp_path / "signals")
 
 
 # ─── _load_meta ─────────────────────────────────────────────────────────

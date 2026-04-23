@@ -89,6 +89,7 @@ async def memory_capture(
     entities: list[str] | None = None,
     source: str = "typed",
     title: str | None = None,
+    okrs: list[str] | None = None,
     index: bool = True,
 ) -> dict[str, Any]:
     """Write a memo. Returns {path, id, type, domain, indexed}."""
@@ -98,6 +99,7 @@ async def memory_capture(
         entities=entities or [],
         source=source,
         title=title,
+        okrs=okrs or [],
     )
     indexed = False
     if index:
@@ -377,7 +379,9 @@ async def memory_show(query: str) -> dict[str, Any]:
     name="memory.search",
     description=(
         "Hybrid vector + keyword search over brain/. Filters: "
-        f"domain={sorted(DOMAINS)}, type=signal|note|daily|entity, entity=slug."
+        f"domain={sorted(DOMAINS)}, type=signal|note|daily|entity|objective|kr, "
+        "entity=slug. Domain/type are applied via frontmatter so Objectives "
+        "and KRs tagged with a domain surface on `-d <domain>` queries."
     ),
 )
 async def memory_search(

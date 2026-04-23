@@ -64,7 +64,7 @@ def search_cmd(
     ),
     type_: str | None = typer.Option(
         None, "-t", "--type",
-        help="Restrict by type: signal | note | daily | entity.",
+        help="Restrict by type: signal | note | daily | entity | objective | kr.",
     ),
     entity: str | None = typer.Option(
         None, "-e", "--entity",

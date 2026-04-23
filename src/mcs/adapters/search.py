@@ -130,22 +130,38 @@ async def rebuild_all() -> int:
 
 # ─── Search ─────────────────────────────────────────────────────────────
 
+# Recognized type values for the --type filter. Maps to the 'type' field
+# set by the various capture paths.
+_KNOWN_TYPES = frozenset({"signal", "note", "daily", "entity", "objective", "kr"})
+
+
 def _prefix_for(
     brain: Path,
     domain: str | None,
     type_: str | None,
 ) -> str | None:
-    """Resolve the filesystem prefix memsearch should restrict to."""
-    if domain:
-        return str(brain / "domains" / domain)
+    """Path prefix for memsearch restriction.
+
+    Kept as a lightweight hint only — we no longer use it for domain
+    routing (domain lives in frontmatter and the same domain can appear
+    across signals/, domains/X/, objectives/, etc.). The caller still
+    passes `type_` when a clean path split is obvious so memsearch can
+    narrow the index scan.
+
+    Returns None when no safe prefix applies; in that case we scan the
+    whole `brain/` and filter post-hoc via frontmatter.
+    """
+    # domain is intentionally unused here — frontmatter post-filter handles it.
+    _ = domain
     if type_ == "signal":
         return str(brain / "signals")
-    if type_ == "note":
-        return str(brain / "domains")
     if type_ == "daily":
         return str(brain / "daily")
     if type_ == "entity":
         return str(brain / "entities")
+    if type_ == "objective" or type_ == "kr":
+        return str(brain / "objectives")
+    # 'note' spans domains/ so no tight prefix.
     return None
 
 
@@ -175,12 +191,16 @@ async def search(
     limit: int = 10,
     auto_index: bool = True,
 ) -> list[SearchHit]:
-    """Hybrid search over brain/ with optional filters.
+    """Hybrid search over brain/ with frontmatter-aware filters.
 
     Args:
         query:      Free-form query (Korean/English ok).
-        domain:     Restrict to brain/domains/{domain}/. Implies type=note.
-        type:       'signal' | 'note' | 'daily' | 'entity' (path routing).
+        domain:     Post-filter by frontmatter `domain:` — surfaces
+                    Objectives + KRs + domain notes + signals tagged
+                    with that domain, not just `brain/domains/<domain>/`.
+        type:       'signal' | 'note' | 'daily' | 'entity' | 'objective'
+                    | 'kr'. Some map to a path prefix for speed;
+                    enforcement is frontmatter-based.
         entity:     Post-filter: require this entity in frontmatter.
         limit:      Max results to return.
         auto_index: Run ensure_indexed() first (default True).
@@ -192,6 +212,10 @@ async def search(
         raise ValueError(
             f"Unknown domain {domain!r}. Valid: {sorted(DOMAINS)}"
         )
+    if type is not None and type not in _KNOWN_TYPES:
+        raise ValueError(
+            f"Unknown type {type!r}. Valid: {sorted(_KNOWN_TYPES)}"
+        )
 
     settings = load_settings()
     brain = settings.brain_dir.resolve()
@@ -202,9 +226,17 @@ async def search(
 
     ms = get_engine()
     prefix = _prefix_for(brain, domain, type)
-    # Overfetch when post-filtering by entity, since memsearch
-    # doesn't know frontmatter — we drop non-matching rows client-side.
-    fetch_k = limit * 4 if entity else limit
+
+    # Post-filters mean we may drop many rows; overfetch proportionally
+    # so the returned count is actually close to `limit`.
+    multiplier = 1
+    if entity:
+        multiplier *= 4
+    if domain:
+        multiplier *= 4
+    if type:
+        multiplier *= 2
+    fetch_k = max(limit * multiplier, limit)
 
     raw = await ms.search(query, top_k=fetch_k, source_prefix=prefix)
 
@@ -216,6 +248,10 @@ async def search(
         path = Path(source).resolve()
         row_type, row_domain, row_entities = _load_meta(path)
 
+        if domain and row_domain != domain:
+            continue
+        if type and row_type != type:
+            continue
         if entity and entity not in row_entities:
             continue
 
