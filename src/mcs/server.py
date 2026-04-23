@@ -25,8 +25,10 @@ from mcs.adapters.memory import (
     add_okr_link as core_add_okr_link,
     capture as core_capture,
     capture_structured as core_capture_structured,
+    daily_file_path as core_daily_file_path,
     list_captures_by_date as core_list_captures_by_date,
     load_memo,
+    upsert_daily_section as core_upsert_daily_section,
 )
 from mcs.adapters.okr import (
     OKRError,
@@ -417,6 +419,47 @@ async def memory_templates_list() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+@mcp.tool(
+    name="memory.upsert_daily_section",
+    description=(
+        "Write a `## heading` section into brain/daily/YYYY/MM/DD.md. "
+        "Creates the file with standard frontmatter if missing; otherwise "
+        "replaces the body of an existing section or appends a new one. "
+        "Used by morning-brief / evening-retro to persist generated text."
+    ),
+)
+async def memory_upsert_daily_section(
+    date: str, heading: str, content: str
+) -> dict[str, Any]:
+    try:
+        path = core_upsert_daily_section(date, heading, content)
+    except ValueError as e:
+        return {"error": str(e)}
+    settings = load_settings()
+    try:
+        rel = str(path.relative_to(settings.repo_root.resolve()))
+    except ValueError:
+        rel = str(path)
+    return {"path": str(path), "rel_path": rel, "heading": heading, "date": date}
+
+
+@mcp.tool(
+    name="memory.daily_file_path",
+    description="Resolve brain/daily/YYYY/MM/DD.md for a given date (existence not checked).",
+)
+async def memory_daily_file_path(date: str) -> dict[str, Any]:
+    try:
+        path = core_daily_file_path(date)
+    except ValueError as e:
+        return {"error": str(e)}
+    settings = load_settings()
+    try:
+        rel = str(path.relative_to(settings.repo_root.resolve()))
+    except ValueError:
+        rel = str(path)
+    return {"path": str(path), "rel_path": rel, "exists": path.exists()}
 
 
 @mcp.tool(

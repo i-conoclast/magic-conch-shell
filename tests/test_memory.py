@@ -11,10 +11,12 @@ from mcs.adapters.memory import (
     MemoNotFound,
     add_okr_link,
     capture,
+    daily_file_path,
     list_captures_by_date,
     load_memo,
     resolve_memo,
     supplement_frontmatter,
+    upsert_daily_section,
 )
 
 
@@ -344,3 +346,53 @@ def test_add_okr_link_preserves_existing_field(tmp_brain: Path) -> None:
 def test_add_okr_link_missing_capture_raises(tmp_brain: Path) -> None:
     with pytest.raises(MemoNotFound):
         add_okr_link("2026-99-99-nope", ["x.kr-1"])
+
+
+# ─── daily_file_path / upsert_daily_section ────────────────────────────
+
+def test_daily_file_path_splits_ymd(tmp_brain: Path) -> None:
+    p = daily_file_path("2026-04-23")
+    assert p.is_relative_to(tmp_brain / "daily" / "2026" / "04")
+    assert p.name == "23.md"
+
+
+def test_daily_file_path_rejects_invalid(tmp_brain: Path) -> None:
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        daily_file_path("04/23/2026")
+
+
+def test_upsert_daily_section_creates_file_with_frontmatter(tmp_brain: Path) -> None:
+    path = upsert_daily_section("2026-04-23", "Morning Brief", "오늘 우선순위 3")
+    assert path.exists()
+    post = frontmatter.load(path)
+    assert post.metadata["type"] == "daily"
+    assert post.metadata["date"] == "2026-04-23"
+    assert "## Morning Brief" in post.content
+    assert "오늘 우선순위 3" in post.content
+
+
+def test_upsert_daily_section_appends_new_heading(tmp_brain: Path) -> None:
+    upsert_daily_section("2026-04-23", "Morning Brief", "morning body")
+    upsert_daily_section("2026-04-23", "Evening Retro", "evening body")
+    body = frontmatter.load(daily_file_path("2026-04-23")).content
+    assert "## Morning Brief" in body
+    assert "## Evening Retro" in body
+    assert body.index("Morning Brief") < body.index("Evening Retro")
+
+
+def test_upsert_daily_section_replaces_existing_body(tmp_brain: Path) -> None:
+    upsert_daily_section("2026-04-23", "Morning Brief", "first version")
+    upsert_daily_section("2026-04-23", "Morning Brief", "second version")
+    body = frontmatter.load(daily_file_path("2026-04-23")).content
+    assert "second version" in body
+    assert "first version" not in body
+
+
+def test_upsert_daily_section_preserves_other_sections(tmp_brain: Path) -> None:
+    upsert_daily_section("2026-04-23", "Morning Brief", "morning v1")
+    upsert_daily_section("2026-04-23", "Evening Retro", "evening v1")
+    upsert_daily_section("2026-04-23", "Morning Brief", "morning v2")
+    body = frontmatter.load(daily_file_path("2026-04-23")).content
+    assert "morning v2" in body
+    assert "evening v1" in body   # evening section intact
+    assert "morning v1" not in body

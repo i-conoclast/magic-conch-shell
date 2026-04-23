@@ -323,6 +323,87 @@ def add_okr_link(capture_id: str, kr_ids: Iterable[str]) -> list[str]:
     return merged
 
 
+# ─── daily files ────────────────────────────────────────────────────────
+
+def daily_file_path(date: str) -> Path:
+    """Resolve the path for a daily note — brain/daily/YYYY/MM/DD.md.
+
+    Does NOT create parent folders; callers handle creation on write.
+    """
+    if not _DATE_RE.match(date):
+        raise ValueError(f"date must be 'YYYY-MM-DD', got {date!r}")
+    settings = load_settings()
+    brain = settings.brain_dir.resolve()
+    year, month, day = date.split("-")
+    return brain / "daily" / year / month / f"{day}.md"
+
+
+def _daily_frontmatter(date: str) -> dict[str, Any]:
+    """Minimum frontmatter for a fresh daily file."""
+    return {
+        "id": date,
+        "type": "daily",
+        "date": date,
+        "created_at": now_kst().isoformat(),
+        "source": "generated",
+    }
+
+
+def upsert_daily_section(date: str, heading: str, content: str) -> Path:
+    """Replace (or append) a `## heading` section in the daily file.
+
+    If the daily file does not exist, it is created with standard
+    frontmatter plus the new section. If the heading already appears,
+    its body (up to the next `## ` heading or EOF) is replaced. If
+    not, the section is appended at the end.
+
+    Returns the daily file path.
+    """
+    path = daily_file_path(date)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    heading_line = f"## {heading}"
+    section_body = content.rstrip() + "\n"
+
+    if not path.exists():
+        post = frontmatter.Post(
+            f"{heading_line}\n\n{section_body}",
+            **_daily_frontmatter(date),
+        )
+        path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
+        return path
+
+    post = frontmatter.load(path)
+    body = post.content or ""
+    lines = body.splitlines()
+
+    # Find existing heading line (exact match).
+    start = next(
+        (i for i, ln in enumerate(lines) if ln.strip() == heading_line),
+        -1,
+    )
+    if start == -1:
+        # Append new section with a blank line separator.
+        tail = "\n" if body.strip() else ""
+        new_body = body.rstrip() + f"{tail}\n{heading_line}\n\n{section_body}"
+    else:
+        # Replace existing section body (lines after heading until next `## ` or EOF).
+        end = len(lines)
+        for j in range(start + 1, len(lines)):
+            if lines[j].startswith("## "):
+                end = j
+                break
+        # Preserve blank lines before the next section by leaving the
+        # separator between old end and next block alone.
+        new_section = [heading_line, "", section_body.rstrip(), ""]
+        new_lines = lines[:start] + new_section + lines[end:]
+        new_body = "\n".join(new_lines).rstrip() + "\n"
+
+    new_post = frontmatter.Post(new_body, **(post.metadata or {}))
+    path.write_text(frontmatter.dumps(new_post) + "\n", encoding="utf-8")
+    return path
+
+
 def _infer_type_and_domain(brain: Path, path: Path) -> tuple[str, str | None]:
     """Derive (type, domain) from a file's location under brain/.
 
