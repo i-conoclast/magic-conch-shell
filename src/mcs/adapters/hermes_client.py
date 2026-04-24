@@ -107,6 +107,14 @@ def sync_session_name(date: str | None = None, *, now: datetime | None = None) -
     return f"capture-progress-sync-{n.strftime('%Y-%m-%d')}"
 
 
+def plan_session_name(date: str | None = None, *, now: datetime | None = None) -> str:
+    """Per-day session for daily-plan (interactive)."""
+    if date:
+        return f"daily-plan-{date}"
+    n = now or datetime.now(_KST)
+    return f"daily-plan-{n.strftime('%Y-%m-%d')}"
+
+
 # ─── Response extraction ───────────────────────────────────────────────
 
 def _extract_text(data: dict[str, Any]) -> str:
