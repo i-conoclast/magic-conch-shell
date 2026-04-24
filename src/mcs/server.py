@@ -107,8 +107,9 @@ async def memory_capture(
     title: str | None = None,
     okrs: list[str] | None = None,
     index: bool = True,
+    push_notion: bool = True,
 ) -> dict[str, Any]:
-    """Write a memo. Returns {path, id, type, domain, indexed}."""
+    """Write a memo. Returns {path, id, type, domain, indexed, notion_pushed}."""
     result = core_capture(
         text=text,
         domain=domain,
@@ -126,6 +127,37 @@ async def memory_capture(
             # capture succeeded on disk — indexing is best-effort.
             indexed = False
 
+    notion_pushed = False
+    notion_page_id: str | None = None
+    if push_notion:
+        try:
+            # Resolve any linked KR notion ids so the Notion capture row
+            # carries the relation from day one.
+            kr_notion_ids: list[str] = []
+            for kr_id in (okrs or []):
+                try:
+                    kr = core_okr_get_kr(str(kr_id))
+                    if kr.notion_page_id:
+                        kr_notion_ids.append(kr.notion_page_id)
+                except (OKRError, OKRNotFound):
+                    continue
+
+            cap_input = CaptureInput(
+                mcs_id=result.id,
+                text=text,
+                type=result.type,
+                domain=result.domain,
+                created=result.id[:10],   # slug prefix is YYYY-MM-DD
+                entities=list(entities or []),
+                source=source,
+                kr_notion_ids=kr_notion_ids,
+            )
+            push_res = await notion_mod.push_capture(cap_input)
+            notion_page_id = push_res.notion_page_id
+            notion_pushed = True
+        except Exception:
+            notion_pushed = False
+
     settings = load_settings()
     try:
         rel = str(result.path.resolve().relative_to(settings.repo_root.resolve()))
@@ -139,6 +171,8 @@ async def memory_capture(
         "type": result.type,
         "domain": result.domain,
         "indexed": indexed,
+        "notion_pushed": notion_pushed,
+        "notion_page_id": notion_page_id,
     }
 
 

@@ -40,6 +40,7 @@ def _print_result(
     index_warning: str | None,
     silent: bool,
     kr_updates: list[str] | None = None,
+    notion_line: str | None = None,
 ) -> None:
     if silent:
         console.print(str(path))
@@ -48,6 +49,8 @@ def _print_result(
     console.print(f"  [cyan]{rel_path}[/cyan]")
     for line in kr_updates or []:
         console.print(f"  [dim]kr:[/dim] {line}")
+    if notion_line:
+        console.print(f"  [dim]notion:[/dim] {notion_line}")
     if index_warning:
         console.print(f"  [yellow]⚠[/yellow] [dim]{index_warning}[/dim]")
 
@@ -60,8 +63,12 @@ def _capture_direct(
     title: str | None,
     okrs: list[str],
     no_index: bool,
-) -> tuple[str, str, str, Path, str | None]:
-    """Run capture without going through the daemon. Returns display fields."""
+    no_notion: bool,
+) -> tuple[str, str, str, Path, str | None, str | None]:
+    """Run capture without going through the daemon.
+
+    Returns (kind, id, rel_path, path, index_warning, notion_line).
+    """
     result = core_capture(
         text=text,
         domain=domain,
@@ -78,13 +85,44 @@ def _capture_direct(
         except Exception as e:
             index_warning = f"indexing skipped: {e}"
 
+    notion_line: str | None = None
+    if not no_notion:
+        try:
+            from mcs.adapters import notion as notion_mod
+            from mcs.adapters.notion import CaptureInput
+            from mcs.adapters.okr import OKRError, OKRNotFound, get_kr
+
+            kr_notion_ids: list[str] = []
+            for kr_id in okrs:
+                try:
+                    kr = get_kr(kr_id)
+                    if kr.notion_page_id:
+                        kr_notion_ids.append(kr.notion_page_id)
+                except (OKRError, OKRNotFound):
+                    continue
+
+            cap_input = CaptureInput(
+                mcs_id=result.id,
+                text=text,
+                type=result.type,
+                domain=result.domain,
+                created=result.id[:10],
+                entities=entities,
+                source="typed",
+                kr_notion_ids=kr_notion_ids,
+            )
+            push_res = asyncio.run(notion_mod.push_capture(cap_input))
+            notion_line = f"pushed ({push_res.notion_page_id[-8:]})"
+        except Exception as e:
+            notion_line = f"push skipped: {type(e).__name__}"
+
     root = load_settings().repo_root.resolve()
     try:
         rel = str(result.path.resolve().relative_to(root))
     except ValueError:
         rel = str(result.path)
     kind = "note" if domain else "signal"
-    return kind, result.id, rel, result.path, index_warning
+    return kind, result.id, rel, result.path, index_warning, notion_line
 
 
 def _capture_via_daemon(
@@ -95,8 +133,12 @@ def _capture_via_daemon(
     title: str | None,
     okrs: list[str],
     no_index: bool,
-) -> tuple[str, str, str, Path, str | None]:
-    """Send capture to the daemon via MCP."""
+    no_notion: bool,
+) -> tuple[str, str, str, Path, str | None, str | None]:
+    """Send capture to the daemon via MCP.
+
+    Returns (kind, id, rel_path, path, index_warning, notion_line).
+    """
     payload: dict[str, Any] = {
         "text": text,
         "domain": domain,
@@ -105,16 +147,27 @@ def _capture_via_daemon(
         "source": "typed",
         "title": title,
         "index": not no_index,
+        "push_notion": not no_notion,
     }
     data = asyncio.run(call_tool("memory.capture", payload))
     kind = data.get("type") or ("note" if domain else "signal")
     warning = None if data.get("indexed") or no_index else "indexing skipped"
+
+    notion_line: str | None = None
+    if not no_notion:
+        if data.get("notion_pushed"):
+            pid = data.get("notion_page_id") or ""
+            notion_line = f"pushed ({pid[-8:]})" if pid else "pushed"
+        else:
+            notion_line = "push skipped"
+
     return (
         kind,
         data["id"],
         data["rel_path"],
         Path(data["path"]),
         warning,
+        notion_line,
     )
 
 
@@ -203,6 +256,11 @@ def capture_cmd(
         "--no-index",
         help="Skip immediate embedding (picked up on next `mcs search`).",
     ),
+    no_notion: bool = typer.Option(
+        False,
+        "--no-notion",
+        help="Skip pushing to mcs_captures Notion DB.",
+    ),
     direct: bool = typer.Option(
         False,
         "--direct",
@@ -220,6 +278,7 @@ def capture_cmd(
                 title=title,
                 okrs=okrs_list,
                 no_index=no_index,
+                no_notion=no_notion,
             )
         else:
             fields = _capture_via_daemon(
@@ -229,6 +288,7 @@ def capture_cmd(
                 title=title,
                 okrs=okrs_list,
                 no_index=no_index,
+                no_notion=no_notion,
             )
     except ValueError as e:
         console.print(f"[red]✗[/red] {e}")
@@ -240,7 +300,7 @@ def capture_cmd(
         )
         raise typer.Exit(code=3) from e
 
-    kind, id_, rel, path, index_warning = fields
+    kind, id_, rel, path, index_warning, notion_line = fields
 
     kr_updates: list[str] = []
     if okrs_list and increment:
@@ -254,4 +314,5 @@ def capture_cmd(
         index_warning=index_warning,
         silent=silent,
         kr_updates=kr_updates,
+        notion_line=notion_line,
     )
