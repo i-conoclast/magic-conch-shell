@@ -72,6 +72,7 @@ class KeyResult:
     updated_at: str
     path: Path
     body: str = ""
+    notion_page_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +88,7 @@ class KeyResult:
             "updated_at": self.updated_at,
             "path": str(self.path),
             "body": self.body,
+            "notion_page_id": self.notion_page_id,
         }
 
 
@@ -104,6 +106,7 @@ class Objective:
     folder: Path                  # containing folder
     body: str = ""
     krs: list[KeyResult] = field(default_factory=list)
+    notion_page_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -119,6 +122,7 @@ class Objective:
             "folder": str(self.folder),
             "body": self.body,
             "krs": [kr.to_dict() for kr in self.krs],
+            "notion_page_id": self.notion_page_id,
         }
 
 
@@ -212,6 +216,9 @@ def _load_objective_file(path: Path) -> Objective:
         folder=folder.resolve(),
         body=(post.content or "").strip(),
         krs=[],
+        notion_page_id=(
+            str(meta["notion_page_id"]) if meta.get("notion_page_id") else None
+        ),
     )
     for kr_path in sorted(folder.glob("kr-*.md")):
         obj.krs.append(_load_kr_file(kr_path))
@@ -234,6 +241,9 @@ def _load_kr_file(path: Path) -> KeyResult:
         updated_at=str(meta.get("updated_at") or ""),
         path=path.resolve(),
         body=(post.content or "").strip(),
+        notion_page_id=(
+            str(meta["notion_page_id"]) if meta.get("notion_page_id") else None
+        ),
     )
 
 
@@ -417,6 +427,30 @@ def create_kr(
     )
     _touch_parent(obj_path)
     return _load_kr_file(path)
+
+
+def set_kr_notion_page_id(kr_id: str, page_id: str) -> None:
+    """Persist a Notion page id onto a KR file (no updated_at bump)."""
+    path = _find_kr_path(kr_id)
+    post = frontmatter.load(path)
+    meta = dict(post.metadata or {})
+    meta["notion_page_id"] = page_id
+    path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+        encoding="utf-8",
+    )
+
+
+def set_objective_notion_page_id(objective_id: str, page_id: str) -> None:
+    """Persist a Notion page id onto an Objective's _objective.md."""
+    path = _find_objective_path(objective_id)
+    post = frontmatter.load(path)
+    meta = dict(post.metadata or {})
+    meta["notion_page_id"] = page_id
+    path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+        encoding="utf-8",
+    )
 
 
 def update_kr(kr_id: str, **fields: Any) -> KeyResult:

@@ -30,6 +30,13 @@ from mcs.adapters.memory import (
     load_memo,
     upsert_daily_section as core_upsert_daily_section,
 )
+from mcs.adapters import notion as notion_mod
+from mcs.adapters.notion import (
+    CaptureInput,
+    DailyTaskInput,
+    NotionConfigError,
+    NotionError,
+)
 from mcs.adapters.okr import (
     OKRError,
     OKRNotFound,
@@ -40,6 +47,8 @@ from mcs.adapters.okr import (
     get as core_okr_get,
     get_kr as core_okr_get_kr,
     list_active as core_okr_list_active,
+    set_kr_notion_page_id,
+    set_objective_notion_page_id,
     spawn_kr_agent as core_okr_spawn_kr_agent,
     update_kr as core_okr_update_kr,
     update_objective as core_okr_update_objective,
@@ -565,6 +574,207 @@ async def memory_search(
         auto_index=auto_index,
     )
     return [h.to_dict() for h in hits]
+
+
+# ─── Notion tools ──────────────────────────────────────────────────────
+
+@mcp.tool(
+    name="notion.push_objective",
+    description=(
+        "Upsert an Objective to mcs_okr_master. Writes notion_page_id back"
+        " into brain/objectives/<slug>/_objective.md. Returns"
+        " {notion_page_id} or {error}."
+    ),
+)
+async def notion_push_objective(objective_id: str) -> dict[str, Any]:
+    try:
+        obj = core_okr_get(objective_id)
+    except OKRNotFound as e:
+        return {"error": str(e)}
+    try:
+        result = await notion_mod.push_objective(
+            mcs_id=obj.id,
+            name=obj.body.split("\n", 1)[0].strip("# ").strip() or obj.id,
+            quarter=obj.quarter,
+            domain=obj.domain,
+            status=obj.status,
+            confidence=obj.confidence,
+            existing_page_id=obj.notion_page_id,
+        )
+    except (NotionError, NotionConfigError) as e:
+        return {"error": str(e)}
+    set_objective_notion_page_id(obj.id, result.notion_page_id)
+    return {"notion_page_id": result.notion_page_id}
+
+
+@mcp.tool(
+    name="notion.push_kr",
+    description=(
+        "Upsert a KR to mcs_kr_tracker. Parent Objective must have a"
+        " notion_page_id already (run notion.push_objective or okr.push first)."
+    ),
+)
+async def notion_push_kr(kr_id: str) -> dict[str, Any]:
+    try:
+        kr = core_okr_get_kr(kr_id)
+    except (OKRError, OKRNotFound) as e:
+        return {"error": str(e)}
+    try:
+        obj = core_okr_get(kr.parent)
+    except OKRNotFound as e:
+        return {"error": str(e)}
+    try:
+        result = await notion_mod.push_kr(
+            mcs_id=kr.id,
+            name=kr.text,
+            objective_notion_id=obj.notion_page_id,
+            target=kr.target,
+            current=kr.current,
+            unit=kr.unit,
+            status=kr.status,
+            due=kr.due,
+            quarter=obj.quarter,
+            existing_page_id=kr.notion_page_id,
+        )
+    except (NotionError, NotionConfigError) as e:
+        return {"error": str(e)}
+    set_kr_notion_page_id(kr.id, result.notion_page_id)
+    return {"notion_page_id": result.notion_page_id}
+
+
+@mcp.tool(
+    name="okr.push",
+    description=(
+        "Push an Objective plus every KR under it to Notion in one call."
+        " Idempotent: existing pages are updated, missing ones created."
+    ),
+)
+async def okr_push(objective_id: str) -> dict[str, Any]:
+    try:
+        obj = core_okr_get(objective_id)
+    except OKRNotFound as e:
+        return {"error": str(e)}
+    try:
+        obj_name = obj.body.split("\n", 1)[0].strip("# ").strip() or obj.id
+        obj_res = await notion_mod.push_objective(
+            mcs_id=obj.id,
+            name=obj_name,
+            quarter=obj.quarter,
+            domain=obj.domain,
+            status=obj.status,
+            confidence=obj.confidence,
+            existing_page_id=obj.notion_page_id,
+        )
+        set_objective_notion_page_id(obj.id, obj_res.notion_page_id)
+
+        kr_out = []
+        for kr in obj.krs:
+            res = await notion_mod.push_kr(
+                mcs_id=kr.id,
+                name=kr.text,
+                objective_notion_id=obj_res.notion_page_id,
+                target=kr.target,
+                current=kr.current,
+                unit=kr.unit,
+                status=kr.status,
+                due=kr.due,
+                quarter=obj.quarter,
+                existing_page_id=kr.notion_page_id,
+            )
+            set_kr_notion_page_id(kr.id, res.notion_page_id)
+            kr_out.append({"id": kr.id, "notion_page_id": res.notion_page_id})
+    except (NotionError, NotionConfigError) as e:
+        return {"error": str(e)}
+    return {"objective": obj_res.notion_page_id, "krs": kr_out}
+
+
+@mcp.tool(
+    name="notion.push_daily_tasks",
+    description=(
+        "Create daily_tasks rows. Each task dict keys: task (required), "
+        "date (YYYY-MM-DD required), time_start, time_end, status, kr_id "
+        "(mcs kr-id), priority (must|should|could), quantity, notes, source."
+    ),
+)
+async def notion_push_daily_tasks(
+    tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    inputs: list[DailyTaskInput] = []
+    for t in tasks:
+        kr_notion_id = None
+        if t.get("kr_id"):
+            try:
+                kr = core_okr_get_kr(str(t["kr_id"]))
+                kr_notion_id = kr.notion_page_id
+            except (OKRError, OKRNotFound):
+                return {"error": f"unknown kr_id {t.get('kr_id')!r}"}
+            if not kr_notion_id:
+                return {
+                    "error": (
+                        f"kr {t['kr_id']!r} has no notion_page_id — "
+                        f"run okr.push on its Objective first."
+                    )
+                }
+        inputs.append(
+            DailyTaskInput(
+                task=str(t["task"]),
+                date=str(t["date"]),
+                time_start=t.get("time_start"),
+                time_end=t.get("time_end"),
+                status=str(t.get("status") or "todo"),
+                kr_notion_id=kr_notion_id,
+                priority=t.get("priority"),
+                quantity=t.get("quantity"),
+                notes=t.get("notes"),
+                source=str(t.get("source") or "mcs-brief"),
+            )
+        )
+    try:
+        ids = await notion_mod.push_daily_tasks(inputs)
+    except (NotionError, NotionConfigError) as e:
+        return {"error": str(e)}
+    return {"created": ids}
+
+
+@mcp.tool(
+    name="notion.push_capture",
+    description=(
+        "Upsert a capture to mcs_captures. Resolves frontmatter okrs to"
+        " Notion KR relation. Returns {notion_page_id} or {error}."
+    ),
+)
+async def notion_push_capture(capture_id: str) -> dict[str, Any]:
+    try:
+        memo = load_memo(capture_id)
+    except (MemoNotFound, MemoAmbiguous) as e:
+        return {"error": str(e)}
+
+    import frontmatter as _fm
+    meta = (_fm.load(memo.path).metadata) or {}
+    kr_notion_ids: list[str] = []
+    for kr_id in (meta.get("okrs") or []):
+        try:
+            kr = core_okr_get_kr(str(kr_id))
+            if kr.notion_page_id:
+                kr_notion_ids.append(kr.notion_page_id)
+        except (OKRError, OKRNotFound):
+            continue
+
+    cap_input = CaptureInput(
+        mcs_id=memo.id,
+        text=memo.body,
+        type=memo.type or "signal",
+        domain=memo.domain,
+        created=(memo.created_at or "")[:10] or memo.id[:10],
+        entities=memo.entities,
+        source=memo.source or "typed",
+        kr_notion_ids=kr_notion_ids,
+    )
+    try:
+        result = await notion_mod.push_capture(cap_input)
+    except (NotionError, NotionConfigError) as e:
+        return {"error": str(e)}
+    return {"notion_page_id": result.notion_page_id}
 
 
 def run_server(

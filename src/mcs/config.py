@@ -28,6 +28,18 @@ class Settings(BaseModel):
     notion_daily_tasks_db: str | None = None
     notion_calendar_db: str | None = None
 
+    # mcs-owned Notion integration (separate from plan-tracker's):
+    #   MCS_NOTION_TOKEN             — integration secret (ntn_...)
+    #   MCS_NOTION_OKR_MASTER_DB     — Objective pages
+    #   MCS_NOTION_KR_TRACKER_DB     — KR pages (synced from okr / tasks / captures)
+    #   MCS_NOTION_DAILY_TASKS_DB    — task pages (plan-tracker-style properties)
+    #   MCS_NOTION_CAPTURES_DB       — capture pages (multi-select entities)
+    mcs_notion_token: str | None = None
+    mcs_notion_okr_master_db: str | None = None
+    mcs_notion_kr_tracker_db: str | None = None
+    mcs_notion_daily_tasks_db: str | None = None
+    mcs_notion_captures_db: str | None = None
+
     # Daemon (MCP HTTP server that owns MemSearch + watcher)
     daemon_host: str = Field(default="127.0.0.1")
     daemon_port: int = Field(default=18342)
@@ -50,9 +62,40 @@ class Settings(BaseModel):
             notion_token=os.environ.get("NOTION_TOKEN"),
             notion_daily_tasks_db=os.environ.get("NOTION_DAILY_TASKS_DB"),
             notion_calendar_db=os.environ.get("NOTION_CALENDAR_DB"),
+            mcs_notion_token=_env_or_hermes_env("MCS_NOTION_TOKEN"),
+            mcs_notion_okr_master_db=_env_or_hermes_env("MCS_NOTION_OKR_MASTER_DB"),
+            mcs_notion_kr_tracker_db=_env_or_hermes_env("MCS_NOTION_KR_TRACKER_DB"),
+            mcs_notion_daily_tasks_db=_env_or_hermes_env("MCS_NOTION_DAILY_TASKS_DB"),
+            mcs_notion_captures_db=_env_or_hermes_env("MCS_NOTION_CAPTURES_DB"),
             daemon_host=os.environ.get("MCS_DAEMON_HOST", "127.0.0.1"),
             daemon_port=int(os.environ.get("MCS_DAEMON_PORT", "18342")),
         )
+
+
+def _env_or_hermes_env(key: str) -> str | None:
+    """Resolve an env key from the process env, falling back to ~/.hermes/.env.
+
+    Hermes's gateway loads ~/.hermes/.env, so mcs's HTTP-MCP tools invoked
+    through Hermes see those vars. CLI commands spawned directly do not —
+    this fallback reads the same file so behaviour matches either path.
+    """
+    val = os.environ.get(key)
+    if val:
+        return val
+    from pathlib import Path
+    dotenv = Path.home() / ".hermes" / ".env"
+    if not dotenv.exists():
+        return None
+    try:
+        for line in dotenv.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        return None
+    return None
 
 
 def load_settings() -> Settings:

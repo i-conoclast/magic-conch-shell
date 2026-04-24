@@ -513,6 +513,84 @@ def _run_agent_repl(
         user_msg = None  # next iteration prompts
 
 
+# ─── push (Notion — mechanical, data layer) ────────────────────────────
+
+@app.command("push")
+def push_cmd(
+    objective_id: str = typer.Argument(..., help="e.g. 2026-Q2-career-mle-role"),
+    direct: bool = typer.Option(
+        False, "--direct",
+        help="Bypass daemon and call Notion directly from this CLI process.",
+    ),
+) -> None:
+    """Push an Objective and all its KRs to Notion (mcs_okr_master + mcs_kr_tracker)."""
+    if direct:
+        # Direct path: import here to avoid asyncio coupling in CLI import time.
+        from mcs.adapters import notion as notion_mod_direct
+        from mcs.adapters.notion import NotionConfigError, NotionError
+
+        try:
+            obj = core_get(objective_id)
+        except OKRNotFound as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=4)
+
+        async def _run() -> dict[str, Any]:
+            name = obj.body.split("\n", 1)[0].strip("# ").strip() or obj.id
+            obj_res = await notion_mod_direct.push_objective(
+                mcs_id=obj.id,
+                name=name,
+                quarter=obj.quarter,
+                domain=obj.domain,
+                status=obj.status,
+                confidence=obj.confidence,
+                existing_page_id=obj.notion_page_id,
+            )
+            from mcs.adapters.okr import set_objective_notion_page_id
+            set_objective_notion_page_id(obj.id, obj_res.notion_page_id)
+
+            kr_out: list[dict[str, Any]] = []
+            for kr in obj.krs:
+                res = await notion_mod_direct.push_kr(
+                    mcs_id=kr.id,
+                    name=kr.text,
+                    objective_notion_id=obj_res.notion_page_id,
+                    target=kr.target,
+                    current=kr.current,
+                    unit=kr.unit,
+                    status=kr.status,
+                    due=kr.due,
+                    quarter=obj.quarter,
+                    existing_page_id=kr.notion_page_id,
+                )
+                from mcs.adapters.okr import set_kr_notion_page_id
+                set_kr_notion_page_id(kr.id, res.notion_page_id)
+                kr_out.append({"id": kr.id, "notion_page_id": res.notion_page_id})
+            return {"objective": obj_res.notion_page_id, "krs": kr_out}
+
+        try:
+            data = asyncio.run(_run())
+        except (NotionError, NotionConfigError) as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=2) from e
+    else:
+        try:
+            data = _run(call_tool("okr.push", {"objective_id": objective_id}))
+        except DaemonUnreachable:
+            raise
+        if "error" in data:
+            console.print(f"[red]✗[/red] {data['error']}")
+            raise typer.Exit(code=2)
+
+    console.print(f"[green]✓[/green] objective [cyan]{objective_id}[/cyan]")
+    console.print(f"  [dim]notion_page_id:[/dim] {data['objective']}")
+    for kr in data.get("krs", []):
+        console.print(
+            f"  [green]·[/green] [cyan]{kr['id']}[/cyan]  "
+            f"[dim]{kr['notion_page_id']}[/dim]"
+        )
+
+
 # ─── sync (agent — capture-progress-sync skill) ────────────────────────
 
 @app.command("sync")
