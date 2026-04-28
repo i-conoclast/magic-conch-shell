@@ -115,6 +115,14 @@ def plan_session_name(date: str | None = None, *, now: datetime | None = None) -
     return f"daily-plan-{n.strftime('%Y-%m-%d')}"
 
 
+def retro_session_name(date: str | None = None, *, now: datetime | None = None) -> str:
+    """Per-day session for evening-retro (single-shot, but resumable same day)."""
+    if date:
+        return f"evening-retro-{date}"
+    n = now or datetime.now(_KST)
+    return f"evening-retro-{n.strftime('%Y-%m-%d')}"
+
+
 # ─── Response extraction ───────────────────────────────────────────────
 
 def _extract_text(data: dict[str, Any]) -> str:
