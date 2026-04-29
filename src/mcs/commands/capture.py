@@ -90,17 +90,9 @@ def _capture_direct(
         try:
             from mcs.adapters import notion as notion_mod
             from mcs.adapters.notion import CaptureInput
-            from mcs.adapters.okr import OKRError, OKRNotFound, get_kr
 
-            kr_notion_ids: list[str] = []
-            for kr_id in okrs:
-                try:
-                    kr = get_kr(kr_id)
-                    if kr.notion_page_id:
-                        kr_notion_ids.append(kr.notion_page_id)
-                except (OKRError, OKRNotFound):
-                    continue
-
+            # New captures have no task links yet — capture-progress-sync
+            # later wires the Tasks relation via add_task_link + push_capture.
             cap_input = CaptureInput(
                 mcs_id=result.id,
                 text=text,
@@ -109,7 +101,6 @@ def _capture_direct(
                 created=result.id[:10],
                 entities=entities,
                 source="typed",
-                kr_notion_ids=kr_notion_ids,
             )
             push_res = asyncio.run(notion_mod.push_capture(cap_input))
             notion_line = f"pushed ({push_res.notion_page_id[-8:]})"

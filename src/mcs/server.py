@@ -132,17 +132,8 @@ async def memory_capture(
     notion_page_id: str | None = None
     if push_notion:
         try:
-            # Resolve any linked KR notion ids so the Notion capture row
-            # carries the relation from day one.
-            kr_notion_ids: list[str] = []
-            for kr_id in (okrs or []):
-                try:
-                    kr = core_okr_get_kr(str(kr_id))
-                    if kr.notion_page_id:
-                        kr_notion_ids.append(kr.notion_page_id)
-                except (OKRError, OKRNotFound):
-                    continue
-
+            # New captures have no task links yet — capture-progress-sync
+            # later runs add_task_link + push_capture to wire them up.
             cap_input = CaptureInput(
                 mcs_id=result.id,
                 text=text,
@@ -151,7 +142,6 @@ async def memory_capture(
                 created=result.id[:10],   # slug prefix is YYYY-MM-DD
                 entities=list(entities or []),
                 source=source,
-                kr_notion_ids=kr_notion_ids,
             )
             push_res = await notion_mod.push_capture(cap_input)
             notion_page_id = push_res.notion_page_id
@@ -897,8 +887,10 @@ async def notion_push_daily_tasks(
 @mcp.tool(
     name="notion.push_capture",
     description=(
-        "Upsert a capture to mcs_captures. Resolves frontmatter okrs to"
-        " Notion KR relation. Returns {notion_page_id} or {error}."
+        "Upsert a capture to mcs_captures. Reads frontmatter `tasks` (list of"
+        " Notion daily_task page ids written by memory.add_task_link) and"
+        " writes them as the Notion Tasks relation. Returns {notion_page_id}"
+        " or {error}."
     ),
 )
 async def notion_push_capture(capture_id: str) -> dict[str, Any]:
@@ -909,14 +901,11 @@ async def notion_push_capture(capture_id: str) -> dict[str, Any]:
 
     import frontmatter as _fm
     meta = (_fm.load(memo.path).metadata) or {}
-    kr_notion_ids: list[str] = []
-    for kr_id in (meta.get("okrs") or []):
-        try:
-            kr = core_okr_get_kr(str(kr_id))
-            if kr.notion_page_id:
-                kr_notion_ids.append(kr.notion_page_id)
-        except (OKRError, OKRNotFound):
-            continue
+    task_notion_ids: list[str] = [
+        str(t).strip()
+        for t in (meta.get("tasks") or [])
+        if t and str(t).strip()
+    ]
 
     cap_input = CaptureInput(
         mcs_id=memo.id,
@@ -926,7 +915,7 @@ async def notion_push_capture(capture_id: str) -> dict[str, Any]:
         created=(memo.created_at or "")[:10] or memo.id[:10],
         entities=memo.entities,
         source=memo.source or "typed",
-        kr_notion_ids=kr_notion_ids,
+        task_notion_ids=task_notion_ids,
     )
     try:
         result = await notion_mod.push_capture(cap_input)
