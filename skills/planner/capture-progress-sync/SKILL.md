@@ -1,131 +1,163 @@
 ---
 name: capture-progress-sync
 description: |
-  Walks through a day's captures and proposes KR progress updates by
-  cross-referencing them with active Objectives. Intended for evening
-  retro cadence but can be invoked ad-hoc for any date. Slash trigger:
+  Walks through a day's captures and proposes capture↔task matches by
+  cross-referencing them with today's Notion daily_tasks rows.
+  On user approval: creates capture↔task synced relations, transitions
+  task Status (시작 전 → 진행 중 / 완료), and bumps the parent KR's
+  current when warranted. Intended for evening retro cadence but can be
+  invoked ad-hoc for any date. Slash trigger:
   `/capture-progress-sync [YYYY-MM-DD]`.
 metadata:
   hermes:
     tags: [planner, okr, progress]
     requires_tools:
       - mcp_mcs_memory_list_captures
-      - mcp_mcs_memory_add_okr_link
+      - mcp_mcs_memory_add_task_link
+      - mcp_mcs_notion_list_daily_tasks
+      - mcp_mcs_notion_update_daily_task_status
+      - mcp_mcs_notion_push_capture
       - mcp_mcs_okr_list_active
       - mcp_mcs_okr_update_kr
 ---
 
 # 캡처 진척 동기화
 
-하루치 캡처를 돌아보고 **활성 OKR의 KR 진척에 연결**하는 스킬. 사용자가
-`mcs capture --kr` 로 매번 수동 링크하지 않아도, 이 스킬이 저녁에 일괄
-제안해 승인받아 반영한다.
+오늘 만든 capture 들을 같은 날의 daily_tasks 와 묶어 진척으로 반영하는
+스킬. 핵심:
+- **task 가 1차 연결 대상**. KR 은 task 를 통해 transitive 로 묶임.
+- **task 매칭 안 되는 capture** 는 그냥 둠 (옵션 A: KR 직접 링크 안 함).
+- 사용자 승인 시점에만 Notion 에 쓰기 (capture.Tasks relation, task.Status,
+  필요 시 KR.current).
 
 ## 당신의 역할
 
-- **제안만 한다.** 최종 결정은 사용자.
-- **짧게.** 후보 캡처·KR 쌍을 한 화면에 정리. 장황한 설명 금지.
-- **이미 링크된 건 건드리지 않는다.** 중복 검증 (capture.okrs 에
-  해당 kr_id 이미 있으면 스킵).
+- **객관 매칭**: capture text + 오늘 task list 비교 → 자연스러운 짝.
+- **상태 추정**: 매칭만 되면 task Status `시작 전` → `진행 중`. 사용자가
+  "1번 완료" / "task 2 done" 명시하면 → `완료`. 추측으로 `완료` 만들지 말 것.
+- **KR 진척**: task 가 `완료` 로 가는 시점에만, 그 task 의 KR 에 `+task.quantity`
+  (없으면 +1) 제안. 사용자가 승인하면 `okr.update_kr` 호출.
 
 ## 대화 흐름
 
-### Phase 1 — 범위 결정
+### Phase 1 — 컨텍스트 로드
 
-1. opener 에 날짜가 있으면 그 날짜 사용. 없으면 **오늘 KST 날짜**
-   (YYYY-MM-DD 포맷).
-2. `mcp_mcs_memory_list_captures(date=<that>)` 호출 → 캡처 목록.
-3. 캡처 0개 → "오늘 캡처 없어. 끝." 종료.
+1. opener 에 날짜 있으면 그 날짜. 없으면 **오늘 KST**.
+2. `mcp_mcs_memory_list_captures(date=<that>)` — 오늘 캡처 목록.
+3. `mcp_mcs_notion_list_daily_tasks(date=<that>)` — 오늘 task 목록 (Notion).
+4. `mcp_mcs_okr_list_active()` — 활성 KR (kr_id ↔ notion_page_id 매핑용).
+5. 캡처 0개 → "오늘 캡처 없음. 끝." 종료.
+6. task 0개 → "오늘 plan 도 없음 — `/morning-brief` 부터?" 안내 후 종료.
 
-### Phase 2 — 활성 KR 로드
+### Phase 2 — 매칭 제안 (LLM 판단)
 
-1. `mcp_mcs_okr_list_active()` 호출 → active Objective 와 그 안의 KR 들.
-2. KR 0개 → "지금 활성 KR 없어 — 동기화할 대상 없음." 종료.
-3. 플랫 KR 리스트 만들기: id, text, parent, current/target.
+각 capture 에 대해 task 후보 0~N 개 제안. 판단 기준:
 
-### Phase 3 — 매칭 제안 (LLM 판단)
-
-각 캡처에 대해, 문맥 (text + domain + entities + excerpt) 을 KR 리스트와
-비교해 **0~N 개 후보**를 제안. 판단 기준:
-
-- **caption 이 KR 의 실행 증거인가?** (목적어·수치·시점 일치)
-- **domain 일치** (career 캡처는 career Objective 의 KR 위주)
-- **entities 겹침** (같은 사람·회사 언급)
+- **capture text vs task text**: 동사·목적어·수치 일치
+- **이미 같은 task 와 link 된 capture 는 스킵** (capture.tasks frontmatter
+  또는 task.capture_count 로 확인)
+- **domain 일치 가산점**: capture.domain == task 추정 도메인 (KR 의 domain)
 
 제안 형식:
 ```
-capture [c-1] "오늘 mock interview 2회 완료" (career)
-  → 2026-Q2-mle-offer.kr-2 (+2)    <근거 한 줄>
-  → 2026-Q2-mle-offer.kr-3 (+0)    <참조, 증분 없음>
+capture [c-1] "tokenization workbook 1쪽 완료" (ml)
+  → task #2 "tokenization 주제 workbook 1 페이지 착수"
+     status 변화 제안: 시작 전 → 진행 중
+     (사용자가 "완료" 명시하면 → 완료, kr-1 +1)
 
-capture [c-2] "..."
+capture [c-2] "Anthropic 2차 대비 정리"
+  → task #3 "Anthropic 면접 시스템 디자인 복기"
+     status 변화 제안: 시작 전 → 진행 중
+
+capture [c-3] "주말 산책"
   → (매칭 없음)
 ```
 
-근거는 한 줄, 과장 금지. increment 가 0 이면 "참조만 · 진척 증분 없음".
+근거 짧게. **추측 금지**: capture 가 단순히 KR 도메인이라고 무리하게 task 에
+배정하지 말 것. 매칭 부족하면 "(매칭 없음)" 으로 두기.
 
-**매칭 0개인 캡처**는 "(매칭 없음)" 명시. 사용자가 놓친 링크가 없다는
-신호이기도 함.
+### Phase 3 — 일괄 승인
 
-### Phase 4 — 일괄 승인
-
-전체 제안을 보여준 뒤 한 번에 물음:
+전체 제안 후 한 번에 묻기:
 
 ```
-승인할 쌍 번호 (여러 개면 쉼표, 전체 y, 취소 n):
+승인 (전체 y / 번호 1,3 / "1번 완료" / "2번 task 빼" / 취소 n):
 ```
 
-- `y` / `yes` → 모든 제안 승인
-- `n` / `no` → 취소, 아무 것도 반영 안 함
-- `1,3,5` 같은 목록 → 해당 번호만
-- `skip capture c-2` 같은 명령 → 해당 캡처의 모든 제안 제외
+- `y` / `yes` → 모든 매칭 승인 (status: 시작 전 → 진행 중)
+- `n` / `no` / `cancel` / `취소` → 아무 변경 없음, 종료
+- `1,3` → 해당 번호만 승인
+- `1번 완료` / `task 2 done` → 1번/2번 task 의 status 를 `완료` 로 (KR bump 포함)
+- `2번 task 빼` → 그 매칭 제외
 
-### Phase 5 — 반영
+### Phase 4 — 반영 (승인된 것만)
 
-승인된 쌍 각각에 대해:
+각 승인된 (capture, task) 쌍:
 
-1. increment > 0 이면 `mcp_mcs_okr_update_kr(kr_id, fields={"current": <new>})`
-   호출. new_current = 현재 current + increment.
-   (update_kr 의 auto-transition 로직이 target 도달 시 status 자동 조정)
-2. 무조건 `mcp_mcs_memory_add_okr_link(capture_id, [kr_id])` 호출해서
-   capture 의 okrs frontmatter 업데이트. increment 0 인 "참조만" 도 링크는 기록.
+1. **capture frontmatter 업데이트**:
+   `mcp_mcs_memory_add_task_link(capture_id, task_notion_ids=[task.page_id])`
+2. **Notion capture row push**:
+   `mcp_mcs_notion_push_capture(capture_id)` — adapter 가 frontmatter 의
+   `tasks` 를 Notion `Tasks` relation 으로 보냄
+3. **task status 전이**:
+   - 사용자가 그 번호에 "완료" 명시 → `완료` 로
+   - 그 외, task 가 현재 `시작 전` → `진행 중`
+   - 이미 `진행 중` / `완료` 면 그대로
+   `mcp_mcs_notion_update_daily_task_status(task.page_id, new_status)`
+4. **task 가 방금 `완료` 로 갔으면 → KR bump**:
+   - task.kr_notion_id 가 있으면 → 해당 KR 의 mcs id 찾기 (active KR 목록에서 매칭)
+   - increment = task.quantity (없으면 1)
+   - `mcp_mcs_okr_update_kr(kr_id, fields={"current": <new>})`
+   - (이게 자동 Notion KR sync 까지 따라감 — server 가 처리)
 
-실패한 호출이 있으면 개별 한 줄씩 보고. 전체 반영은 계속.
+상태 옵션 이름: `시작 전`, `진행 중`, `완료` (Notion DB 옵션 그대로). 다른 이름이면
+`mcp_mcs_notion_update_daily_task_status` 가 400 에러 — 그 경우 한 줄 보고하고 다음 쌍 진행.
 
-### Phase 6 — 요약
+### Phase 5 — 요약
 
 ```
-✓ 3 쌍 반영:
-  capture c-1 → kr-2 (+2 → 3/5)
-  capture c-1 → kr-3 (참조)
-  capture c-4 → kr-1 (+1 → achieved)
+✓ 3 매칭 반영:
+  capture c-1 → task #2 (시작 전 → 진행 중)
+  capture c-2 → task #3 (시작 전 → 진행 중)
+  capture c-4 → task #1 (시작 전 → 완료, kr-1 0→1)
 
-1 캡처 링크 안 됨 (매칭 없었음):
-  c-3 "일반 회고"
-
-다음 체크인 언급 없이 종료.
+매칭 안 된 capture 1건:
+  c-3 "주말 산책" (관련 task 없음)
 ```
 
 ## 규칙
 
-- **같은 쌍 재처리 금지**: capture.okrs 에 이미 해당 kr_id 가 있으면
-  Phase 3 제안에서 제외.
-- **과장된 increment 금지**: 캡처 텍스트에 명시된 숫자 이상 제안하지 말 것.
-  "mock interview 끝" → +1. "3회 완료" → +3. 불명확 → +1 보수적으로.
-- **민감 도메인 주의**: 도메인이 finance / health-* / relationships 인 캡처는
-  **LLM 이 Codex 를 거친다는 점** 짧게 고지. 사용자가 "보류" 하면 다음 날로.
-- **잔소리 금지**: "왜 kr-X 진척이 느려?" 같은 질문 하지 말 것.
+- **이미 link 된 쌍 재처리 금지**: capture.tasks 에 task.page_id 가 이미 있으면
+  Phase 2 제안에서 제외.
+- **capture 가 여러 task 와 매칭 가능**: list 로 줘도 OK.
+- **task 가 여러 capture 의 evidence**: 자연스러움. 첫 link 만 status 전이
+  유발 (이후 link 는 status 그대로).
+- **민감 도메인 주의**: capture 에 finance / health-* / relationships 도메인이면
+  한 줄 고지 (Codex 노출). 사용자 "보류" 하면 다음 날로.
+- **잔소리 금지**: "왜 task #5 진척 없어?" 같은 질문 X.
+- **KR `current` 값을 직접 큰 폭으로 bump 하지 말 것**: task 단위로만
+  (quantity 없으면 +1). 큰 점프는 사용자가 `mcs okr update` 로.
 
 ## 사용 가능한 MCP 도구
 
 | 도구 | 용도 |
 |---|---|
-| `mcp_mcs_memory_list_captures` | Phase 1 날짜별 캡처 조회 |
-| `mcp_mcs_okr_list_active` | Phase 2 활성 KR 맥락 로드 |
-| `mcp_mcs_okr_update_kr` | Phase 5 current 증가 반영 |
-| `mcp_mcs_memory_add_okr_link` | Phase 5 capture frontmatter okrs 링크 추가 |
+| `mcp_mcs_memory_list_captures` | Phase 1 오늘 캡처 |
+| `mcp_mcs_notion_list_daily_tasks` | Phase 1 오늘 task |
+| `mcp_mcs_okr_list_active` | Phase 1 + Phase 4 KR ↔ notion_page_id 매핑 |
+| `mcp_mcs_memory_add_task_link` | Phase 4 capture frontmatter `tasks:` |
+| `mcp_mcs_notion_push_capture` | Phase 4 capture row → Notion Tasks relation |
+| `mcp_mcs_notion_update_daily_task_status` | Phase 4 task status 전이 |
+| `mcp_mcs_okr_update_kr` | Phase 4 task 완료 시 KR current 증가 |
 
 ## 종료 조건
 
-- 반영 완료 요약 출력 (승인 쌍 수 + 반영 KR 수 + 링크 안 된 캡처 수)
-- 또는 사용자가 취소한 경우: "변경 없음."
+- 반영 요약 출력 (승인 N · 반영 N · 매칭 안 된 capture N)
+- 또는 사용자 취소 → "변경 없음."
+
+## 하지 말 것
+
+- 사용자가 명시 안 한 task 를 마음대로 `완료` 로 만들기.
+- 매칭 안 된 capture 를 KR 에 직접 link (옵션 A — capture.KRs 관계 없음).
+- 같은 capture↔task 쌍 재처리 (idempotency).
+- 같은 KR 에 한 sync 세션에서 +3 이상 점프 (의심스러우면 나눠 묻기).

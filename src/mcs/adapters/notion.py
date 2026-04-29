@@ -364,7 +364,10 @@ class CaptureInput:
     created: str                        # YYYY-MM-DD
     entities: list[str] = field(default_factory=list)
     source: str = "typed"
-    kr_notion_ids: list[str] = field(default_factory=list)
+    # Tasks (mcs_daily_tasks Notion page ids) — capture's primary
+    # back-reference target. KR linkage is now transitive (capture →
+    # task → kr) so direct kr relation was removed from the schema.
+    task_notion_ids: list[str] = field(default_factory=list)
     existing_page_id: str | None = None
 
 
@@ -384,8 +387,8 @@ async def push_capture(cap: CaptureInput) -> PushResult:
         "Source": _select(cap.source),
         "Entities": _multi_select(cap.entities),
     }
-    if cap.kr_notion_ids:
-        props["KRs"] = _relation(cap.kr_notion_ids)
+    if cap.task_notion_ids:
+        props["Tasks"] = _relation(cap.task_notion_ids)
 
     async with httpx.AsyncClient(
         timeout=30.0, headers=_headers(cfg.token)
@@ -419,3 +422,111 @@ async def push_capture(cap: CaptureInput) -> PushResult:
             )
             await asyncio.sleep(_RATE_SLEEP_S)
     return PushResult(id=cap.mcs_id, notion_page_id=resp["id"])
+
+
+# ─── daily_tasks read + status update ──────────────────────────────────
+
+@dataclass
+class DailyTaskRow:
+    """Lightweight summary of a daily_tasks row, used by capture-progress-sync."""
+
+    page_id: str
+    task: str                          # title
+    status: str | None                 # current Status name (KO localized OK)
+    kr_notion_id: str | None           # parent KR page id (via KR relation)
+    capture_count: int                 # synced Captures relation length
+    priority: str | None
+    quantity: float | None
+
+
+def _extract_title(prop: dict | None) -> str:
+    if not prop:
+        return ""
+    arr = prop.get("title") or []
+    return "".join(t.get("plain_text", "") for t in arr).strip()
+
+
+def _extract_status(prop: dict | None) -> str | None:
+    if not prop:
+        return None
+    s = prop.get("status")
+    return s.get("name") if isinstance(s, dict) else None
+
+
+def _extract_select(prop: dict | None) -> str | None:
+    if not prop:
+        return None
+    s = prop.get("select")
+    return s.get("name") if isinstance(s, dict) else None
+
+
+def _extract_number(prop: dict | None) -> float | None:
+    if not prop:
+        return None
+    return prop.get("number")
+
+
+def _extract_relation_ids(prop: dict | None) -> list[str]:
+    if not prop:
+        return []
+    return [r.get("id") for r in (prop.get("relation") or []) if r.get("id")]
+
+
+async def list_daily_tasks(date: str) -> list[DailyTaskRow]:
+    """Return all daily_tasks rows whose `일시` equals the given date.
+
+    Useful for capture-progress-sync: load today's tasks once, then
+    propose capture↔task matches without re-querying per-capture.
+    """
+    cfg = _cfg()
+    payload: dict[str, Any] = {
+        "filter": {"property": "일시", "date": {"equals": date}},
+        "page_size": 100,
+    }
+    out: list[DailyTaskRow] = []
+    async with httpx.AsyncClient(
+        timeout=30.0, headers=_headers(cfg.token)
+    ) as c:
+        while True:
+            body = await _request(
+                c, "POST", f"/databases/{cfg.daily_tasks_db}/query", json=payload
+            )
+            for page in body.get("results") or []:
+                props = page.get("properties") or {}
+                kr_ids = _extract_relation_ids(props.get("KR"))
+                cap_ids = _extract_relation_ids(props.get("Captures"))
+                out.append(
+                    DailyTaskRow(
+                        page_id=page["id"],
+                        task=_extract_title(props.get("Task")),
+                        status=_extract_status(props.get("Status")),
+                        kr_notion_id=kr_ids[0] if kr_ids else None,
+                        capture_count=len(cap_ids),
+                        priority=_extract_select(props.get("우선순위")),
+                        quantity=_extract_number(props.get("수량")),
+                    )
+                )
+            if not body.get("has_more"):
+                break
+            payload["start_cursor"] = body["next_cursor"]
+    return out
+
+
+async def update_daily_task_status(page_id: str, status: str) -> str:
+    """PATCH a daily_tasks row's Status field. Returns the page id.
+
+    `status` must match an option name on the DB (e.g. 시작 전 / 진행 중 /
+    완료). Caller is responsible for picking a valid option — Notion will
+    400 on unknown option names.
+    """
+    cfg = _cfg()
+    async with httpx.AsyncClient(
+        timeout=30.0, headers=_headers(cfg.token)
+    ) as c:
+        resp = await _request(
+            c,
+            "PATCH",
+            f"/pages/{page_id}",
+            json={"properties": {"Status": _status(status)}},
+        )
+    return resp["id"]

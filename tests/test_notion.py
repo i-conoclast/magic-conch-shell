@@ -9,9 +9,16 @@ from __future__ import annotations
 import pytest
 
 from mcs.adapters.notion import (
+    CaptureInput,
+    DailyTaskRow,
     NotionConfigError,
     _cfg,
     _date,
+    _extract_number,
+    _extract_relation_ids,
+    _extract_select,
+    _extract_status,
+    _extract_title,
     _headers,
     _multi_select,
     _number,
@@ -132,3 +139,94 @@ def test_cfg_returns_populated_when_all_set(
     assert cfg.kr_tracker_db == "b"
     assert cfg.daily_tasks_db == "c"
     assert cfg.captures_db == "d"
+
+
+# ─── daily_tasks property extractors ───────────────────────────────────
+
+def test_extract_title_concatenates_segments() -> None:
+    prop = {
+        "title": [
+            {"plain_text": "tokenization "},
+            {"plain_text": "workbook"},
+        ]
+    }
+    assert _extract_title(prop) == "tokenization workbook"
+
+
+def test_extract_title_handles_none_or_empty() -> None:
+    assert _extract_title(None) == ""
+    assert _extract_title({}) == ""
+    assert _extract_title({"title": []}) == ""
+
+
+def test_extract_status_returns_name() -> None:
+    assert _extract_status({"status": {"name": "진행 중"}}) == "진행 중"
+    assert _extract_status({"status": None}) is None
+    assert _extract_status(None) is None
+    assert _extract_status({}) is None
+
+
+def test_extract_select_returns_name() -> None:
+    assert _extract_select({"select": {"name": "high"}}) == "high"
+    assert _extract_select({"select": None}) is None
+    assert _extract_select(None) is None
+
+
+def test_extract_number_passthrough() -> None:
+    assert _extract_number({"number": 3}) == 3
+    assert _extract_number({"number": None}) is None
+    assert _extract_number(None) is None
+
+
+def test_extract_relation_ids_filters_falsy() -> None:
+    prop = {
+        "relation": [
+            {"id": "p1"},
+            {"id": ""},
+            {"id": "p2"},
+            {},
+        ]
+    }
+    assert _extract_relation_ids(prop) == ["p1", "p2"]
+    assert _extract_relation_ids(None) == []
+
+
+# ─── DailyTaskRow / CaptureInput shape ─────────────────────────────────
+
+def test_daily_task_row_construction() -> None:
+    row = DailyTaskRow(
+        page_id="abc",
+        task="tokenization workbook",
+        status="시작 전",
+        kr_notion_id="kr-page",
+        capture_count=2,
+        priority="high",
+        quantity=1.0,
+    )
+    assert row.page_id == "abc"
+    assert row.status == "시작 전"
+    assert row.capture_count == 2
+
+
+def test_capture_input_has_task_notion_ids_default_empty() -> None:
+    cap = CaptureInput(
+        mcs_id="2026-04-23-001",
+        text="hi",
+        type="signal",
+        domain="ml",
+        created="2026-04-23",
+    )
+    assert cap.task_notion_ids == []
+    assert not hasattr(cap, "kr_notion_ids")
+
+
+def test_capture_input_accepts_task_ids() -> None:
+    cap = CaptureInput(
+        mcs_id="2026-04-23-001",
+        text="hi",
+        type="signal",
+        domain="ml",
+        created="2026-04-23",
+        task_notion_ids=["t1", "t2"],
+    )
+    assert cap.task_notion_ids == ["t1", "t2"]

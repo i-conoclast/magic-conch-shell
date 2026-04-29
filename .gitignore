@@ -12,6 +12,12 @@ brain/*
 .brain/*
 !.brain/.gitkeep
 
+# Per-user auto-generated KR agents (template lives in src/mcs/adapters/okr.py)
+skills/objectives/
+
+# Local backups (e.g. openclaw-launchd-backup)
+archive/
+
 # Personal planning & design docs (local only)
 docs/
 

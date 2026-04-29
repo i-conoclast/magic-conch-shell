@@ -605,13 +605,15 @@ name: {slug}
 description: |
   Working agent for KR "{kr_text}" under Objective {parent_id}.
   Invoke via /{slug}. Loads the current KR state, surfaces linked
-  captures, and helps the user push progress forward.
+  captures, and helps the user push the work forward. The KR
+  `current` field is NOT updated here — that's owned by
+  capture-progress-sync (auto) and explicit user paths
+  (mcs okr update / mcs capture --increment).
 metadata:
   hermes:
     tags: [objectives, kr-agent]
     requires_tools:
       - mcp_mcs_okr_get_kr
-      - mcp_mcs_okr_update_kr
       - mcp_mcs_memory_search
       - mcp_mcs_memory_capture
   mcs:
@@ -627,10 +629,12 @@ metadata:
 
 1. `mcp_mcs_okr_get_kr(kr_id="{kr_id}")` 로 현재 상태 (current/target/status/due) 로드
 2. 필요 시 `mcp_mcs_memory_search` 로 이 KR 에 링크된 메모 조회
-3. 사용자 요청에 맞춰 작업 지원 (계획 제안·진척 기록·관련 메모 캡처)
+3. 사용자 요청에 맞춰 작업 지원 (계획 제안·관련 메모 캡처)
 
-진척이 생기면 `mcp_mcs_okr_update_kr` 로 current 증가. 새 관찰/결정은
-`mcp_mcs_memory_capture` 로 `okrs=["{kr_id}"]` 링크해서 저장.
+새 관찰/결정/단편은 `mcp_mcs_memory_capture` 로 `okrs=["{kr_id}"]` 링크해서 저장.
+**KR `current` 값은 직접 업데이트하지 않는다.** 진척 반영은 저녁의
+`capture-progress-sync` 가 일괄 처리하거나, 사용자가 명시적으로
+`mcs okr update` / `mcs capture --increment` 로 한다.
 
 ## KR 목표
 - **Text**: {kr_text}
@@ -644,10 +648,11 @@ metadata:
 ## 작업 원칙
 - 짧게 대화 (SOUL.md consulting 톤).
 - 이 KR 과 무관한 주제로 샛길 가지 말기.
-- 달성 직전 (current == target) 되면 사용자에게 "close 할까?" 물어보기.
+- target 에 가까워 보이면 "오늘 capture-progress-sync 때 +N 하자고 표시해 둘까?"
+  로 사용자에게 알릴 수만 있음 (직접 update_kr 금지).
 
 ## 진척 기록
-(신규 진척 발생 시 날짜 + 한 줄 요약 아래에 append)
+(신규 진척 발생 시 날짜 + 한 줄 요약 아래에 append. KR current 는 안 건드림.)
 
 """
 

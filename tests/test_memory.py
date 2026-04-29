@@ -10,6 +10,7 @@ from mcs.adapters.memory import (
     MemoAmbiguous,
     MemoNotFound,
     add_okr_link,
+    add_task_link,
     capture,
     daily_file_path,
     list_captures_by_date,
@@ -346,6 +347,51 @@ def test_add_okr_link_preserves_existing_field(tmp_brain: Path) -> None:
 def test_add_okr_link_missing_capture_raises(tmp_brain: Path) -> None:
     with pytest.raises(MemoNotFound):
         add_okr_link("2026-99-99-nope", ["x.kr-1"])
+
+
+# ─── add_task_link ─────────────────────────────────────────────────────
+
+def test_add_task_link_appends_deduped(tmp_brain: Path) -> None:
+    r = capture(text="task linked", domain="ml")
+    result = add_task_link(r.path.stem, ["notion-task-1"])
+    assert result == ["notion-task-1"]
+    # idempotent + appends new
+    result2 = add_task_link(r.path.stem, ["notion-task-1", "notion-task-2"])
+    assert result2 == ["notion-task-1", "notion-task-2"]
+    # frontmatter actually persisted
+    assert _read_meta(r.path)["tasks"] == ["notion-task-1", "notion-task-2"]
+
+
+def test_add_task_link_preserves_okrs_field(tmp_brain: Path) -> None:
+    r = capture(
+        text="dual linked",
+        domain="ml",
+        okrs=["2026-Q2-x.kr-1"],
+    )
+    add_task_link(r.path.stem, ["task-page-id"])
+    meta = _read_meta(r.path)
+    assert meta["okrs"] == ["2026-Q2-x.kr-1"]
+    assert meta["tasks"] == ["task-page-id"]
+
+
+def test_add_task_link_empty_input_no_op(tmp_brain: Path) -> None:
+    r = capture(text="will be touched", domain="ml")
+    # Empty/whitespace inputs are filtered — locator still runs
+    assert add_task_link(r.path.stem, []) == []
+    assert add_task_link(r.path.stem, ["", "  "]) == []
+    # tasks field was never written
+    assert "tasks" not in _read_meta(r.path)
+
+
+def test_add_task_link_strips_whitespace(tmp_brain: Path) -> None:
+    r = capture(text="strip test", domain="ml")
+    result = add_task_link(r.path.stem, ["  abc-123  "])
+    assert result == ["abc-123"]
+
+
+def test_add_task_link_missing_capture_raises(tmp_brain: Path) -> None:
+    with pytest.raises(MemoNotFound):
+        add_task_link("2026-99-99-nope", ["page-id"])
 
 
 # ─── daily_file_path / upsert_daily_section ────────────────────────────

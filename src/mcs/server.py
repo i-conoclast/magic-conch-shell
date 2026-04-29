@@ -23,6 +23,7 @@ from mcs.adapters.memory import (
     MemoAmbiguous,
     MemoNotFound,
     add_okr_link as core_add_okr_link,
+    add_task_link as core_add_task_link,
     capture as core_capture,
     capture_structured as core_capture_structured,
     daily_file_path as core_daily_file_path,
@@ -278,7 +279,10 @@ async def okr_create_kr(
     name="okr.update_kr",
     description=(
         "Patch KR fields (text/target/current/unit/status/due/body)"
-        " and re-stamp updated_at."
+        " and re-stamp updated_at. If the KR has a notion_page_id"
+        " (i.e. it was previously pushed to Notion via okr.push), the"
+        " mcs_kr_tracker row is also updated best-effort so Notion"
+        " stays in sync without a manual re-push."
     ),
 )
 async def okr_update_kr(kr_id: str, fields: dict[str, Any]) -> dict[str, Any]:
@@ -286,12 +290,34 @@ async def okr_update_kr(kr_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         kr = core_okr_update_kr(kr_id, **fields)
     except (OKRError, OKRNotFound) as e:
         return {"error": str(e)}
+
+    # Best-effort Notion sync — failures don't undo the brain/ write.
+    if kr.notion_page_id:
+        try:
+            obj = core_okr_get(kr.parent)
+            await notion_mod.push_kr(
+                mcs_id=kr.id,
+                name=kr.text,
+                objective_notion_id=obj.notion_page_id,
+                target=kr.target,
+                current=kr.current,
+                unit=kr.unit,
+                status=kr.status,
+                due=kr.due,
+                quarter=obj.quarter,
+                existing_page_id=kr.notion_page_id,
+            )
+        except Exception:
+            pass
     return kr.to_dict()
 
 
 @mcp.tool(
     name="okr.update_objective",
-    description="Patch Objective-level fields (status/confidence/domain/entities/body).",
+    description=(
+        "Patch Objective-level fields (status/confidence/domain/entities/body)."
+        " Auto-syncs to Notion mcs_okr_master if notion_page_id is set."
+    ),
 )
 async def okr_update_objective(
     objective_id: str, fields: dict[str, Any]
@@ -300,6 +326,40 @@ async def okr_update_objective(
         obj = core_okr_update_objective(objective_id, **fields)
     except (OKRError, OKRNotFound) as e:
         return {"error": str(e)}
+
+    if obj.notion_page_id:
+        try:
+            obj_name = obj.body.split("\n", 1)[0].strip("# ").strip() or obj.id
+            await notion_mod.push_objective(
+                mcs_id=obj.id,
+                name=obj_name,
+                quarter=obj.quarter,
+                domain=obj.domain,
+                status=obj.status,
+                confidence=obj.confidence,
+                existing_page_id=obj.notion_page_id,
+            )
+        except Exception:
+            pass
+
+        # Cascade picks up KR status updates — re-sync those too if pushed.
+        for kr in obj.krs:
+            if kr.notion_page_id:
+                try:
+                    await notion_mod.push_kr(
+                        mcs_id=kr.id,
+                        name=kr.text,
+                        objective_notion_id=obj.notion_page_id,
+                        target=kr.target,
+                        current=kr.current,
+                        unit=kr.unit,
+                        status=kr.status,
+                        due=kr.due,
+                        quarter=obj.quarter,
+                        existing_page_id=kr.notion_page_id,
+                    )
+                except Exception:
+                    pass
     return obj.to_dict()
 
 
@@ -541,6 +601,70 @@ async def memory_add_okr_link(
     except (MemoNotFound, MemoAmbiguous) as e:
         return {"error": str(e)}
     return {"okrs": merged}
+
+
+@mcp.tool(
+    name="memory.add_task_link",
+    description=(
+        "Append Notion daily_tasks page ids to a capture's frontmatter "
+        "`tasks:` field. Idempotent. Used by capture-progress-sync after "
+        "the user approves a capture↔task match. Returns the resulting "
+        "full tasks list or {error}."
+    ),
+)
+async def memory_add_task_link(
+    capture_id: str, task_notion_ids: list[str]
+) -> dict[str, Any]:
+    try:
+        merged = core_add_task_link(capture_id, task_notion_ids)
+    except (MemoNotFound, MemoAmbiguous) as e:
+        return {"error": str(e)}
+    return {"tasks": merged}
+
+
+@mcp.tool(
+    name="notion.list_daily_tasks",
+    description=(
+        "Query mcs_daily_tasks for rows whose 일시 equals the given KST "
+        "date. Returns a list of {page_id, task, status, kr_notion_id, "
+        "capture_count, priority, quantity}. capture-progress-sync uses "
+        "this as Phase 1 context."
+    ),
+)
+async def notion_list_daily_tasks(date: str) -> list[dict[str, Any]]:
+    try:
+        rows = await notion_mod.list_daily_tasks(date)
+    except (NotionError, NotionConfigError) as e:
+        return [{"error": str(e)}]
+    return [
+        {
+            "page_id": r.page_id,
+            "task": r.task,
+            "status": r.status,
+            "kr_notion_id": r.kr_notion_id,
+            "capture_count": r.capture_count,
+            "priority": r.priority,
+            "quantity": r.quantity,
+        }
+        for r in rows
+    ]
+
+
+@mcp.tool(
+    name="notion.update_daily_task_status",
+    description=(
+        "Set a daily_tasks row's Status. `status` must match an option "
+        "name on the DB (e.g. '시작 전' / '진행 중' / '완료')."
+    ),
+)
+async def notion_update_daily_task_status(
+    page_id: str, status: str
+) -> dict[str, Any]:
+    try:
+        pid = await notion_mod.update_daily_task_status(page_id, status)
+    except (NotionError, NotionConfigError) as e:
+        return {"error": str(e)}
+    return {"page_id": pid, "status": status}
 
 
 @mcp.tool(

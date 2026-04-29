@@ -323,6 +323,35 @@ def add_okr_link(capture_id: str, kr_ids: Iterable[str]) -> list[str]:
     return merged
 
 
+def add_task_link(capture_id: str, task_notion_ids: Iterable[str]) -> list[str]:
+    """Append Notion task page ids to a capture's frontmatter `tasks` field.
+
+    Mirrors `add_okr_link` shape — idempotent, deduped. Stores Notion
+    page ids directly since tasks live in Notion (mcs_daily_tasks DB),
+    not in brain/. The capture's `okrs` field still records intended
+    KR linkage (legacy, but useful for capture-progress-sync matching).
+    """
+    to_add = [s.strip() for s in task_notion_ids if s and s.strip()]
+    if not to_add:
+        resolve_memo(capture_id)
+        return []
+
+    path = resolve_memo(capture_id)
+    post = frontmatter.load(path)
+    meta = dict(post.metadata or {})
+    existing = list(meta.get("tasks") or [])
+    merged: list[str] = list(existing)
+    for tid in to_add:
+        if tid not in merged:
+            merged.append(tid)
+    meta["tasks"] = merged
+    path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+        encoding="utf-8",
+    )
+    return merged
+
+
 # ─── daily files ────────────────────────────────────────────────────────
 
 def daily_file_path(date: str) -> Path:
