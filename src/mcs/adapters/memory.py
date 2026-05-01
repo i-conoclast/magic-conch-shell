@@ -592,12 +592,14 @@ def capture_structured(
 
     _apply_entity_backlinks(path, entities)
 
-    return CaptureResult(
+    result = CaptureResult(
         path=path,
         id=meta["id"],
         type=str(meta["type"]),
         domain=domain_for_routing,
     )
+    _schedule_entity_extract_webhook(result)
+    return result
 
 
 def capture(
@@ -668,7 +670,9 @@ def capture(
 
     _apply_entity_backlinks(path, meta["entities"])
 
-    return CaptureResult(path=path, id=meta["id"], type=meta["type"], domain=domain)
+    result = CaptureResult(path=path, id=meta["id"], type=meta["type"], domain=domain)
+    _schedule_entity_extract_webhook(result)
+    return result
 
 
 def _apply_entity_backlinks(record_path: Path, entity_slugs: Iterable[str]) -> None:
@@ -688,3 +692,46 @@ def _apply_entity_backlinks(record_path: Path, entity_slugs: Iterable[str]) -> N
             entity_mod.add_backlink(slug, record_path)
         except entity_mod.EntityError:
             continue
+
+
+def _schedule_entity_extract_webhook(result: "CaptureResult") -> None:
+    """Schedule a fire-and-forget webhook POST to Hermes entity-extract.
+
+    Skipped when:
+    - the feature flag is off (default — turn on once a subscription is
+      registered upstream),
+    - no asyncio loop is running (CLI direct path; the daemon's MCP
+      handler is async, so the webhook fires there).
+    Failures are logged at most — never raised back into the capture call.
+    """
+    settings = load_settings()
+    if not settings.entity_extract_webhook_enabled:
+        return
+    secret = settings.entity_extract_webhook_secret
+    if not secret:
+        return
+
+    try:
+        import asyncio as _asyncio  # local alias keeps memory.py top imports clean
+        loop = _asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    payload = {
+        "capture_id": result.id,
+        "capture_path": str(result.path),
+        "type": result.type,
+        "domain": result.domain,
+    }
+    route = settings.entity_extract_webhook_route
+
+    async def _fire() -> None:
+        from mcs.adapters.hermes_client import fire_webhook
+        out = await fire_webhook(route, payload, secret=secret)
+        if not out["ok"]:
+            print(
+                f"[entity-extract webhook] {route} failed: {out['error']}",
+                flush=True,
+            )
+
+    loop.create_task(_fire())

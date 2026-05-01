@@ -44,6 +44,14 @@ class Settings(BaseModel):
     daemon_host: str = Field(default="127.0.0.1")
     daemon_port: int = Field(default=18342)
 
+    # Webhook trigger (FR-C1: capture → Hermes entity-extract).
+    # Off by default — flip on after registering the subscription via
+    #   `hermes webhook subscribe entity-extract --secret <S> --skills entity-extract`
+    # and setting MCS_ENTITY_EXTRACT_WEBHOOK_SECRET=<S> here.
+    entity_extract_webhook_enabled: bool = Field(default=False)
+    entity_extract_webhook_route: str = Field(default="entity-extract")
+    entity_extract_webhook_secret: str | None = None
+
     @property
     def daemon_url(self) -> str:
         """HTTP URL the MCP client uses to reach the daemon."""
@@ -69,7 +77,22 @@ class Settings(BaseModel):
             mcs_notion_captures_db=_env_or_hermes_env("MCS_NOTION_CAPTURES_DB"),
             daemon_host=os.environ.get("MCS_DAEMON_HOST", "127.0.0.1"),
             daemon_port=int(os.environ.get("MCS_DAEMON_PORT", "18342")),
+            entity_extract_webhook_enabled=_truthy(
+                os.environ.get("MCS_ENTITY_EXTRACT_WEBHOOK_ENABLED")
+            ),
+            entity_extract_webhook_route=os.environ.get(
+                "MCS_ENTITY_EXTRACT_WEBHOOK_ROUTE", "entity-extract"
+            ),
+            entity_extract_webhook_secret=os.environ.get(
+                "MCS_ENTITY_EXTRACT_WEBHOOK_SECRET"
+            ),
         )
+
+
+def _truthy(raw: str | None) -> bool:
+    if not raw:
+        return False
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_or_hermes_env(key: str) -> str | None:
