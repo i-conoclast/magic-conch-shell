@@ -307,3 +307,59 @@ async def test_fire_webhook_returns_error_on_connect_failure(
 async def test_fire_webhook_refuses_empty_secret() -> None:
     out = await fire_webhook("entity-extract", {}, secret="")
     assert out == {"ok": False, "status_code": None, "error": "missing secret"}
+
+
+# ─── pin_skill (Hermes 0.12 Curator gate) ──────────────────────────────
+
+def test_pin_skill_returns_true_on_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcs.adapters.hermes_client import pin_skill
+    import subprocess as _subprocess
+
+    captured: dict = {}
+
+    def fake_run(args, *, capture_output, timeout):
+        captured["args"] = args
+        captured["timeout"] = timeout
+        return _subprocess.CompletedProcess(args=args, returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr("mcs.adapters.hermes_client.subprocess.run", fake_run)
+
+    assert pin_skill("entity-extract") is True
+    assert captured["args"] == ["hermes", "curator", "pin", "entity-extract"]
+
+
+def test_pin_skill_returns_false_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcs.adapters.hermes_client import pin_skill
+    import subprocess as _subprocess
+
+    def fake_run(args, *, capture_output, timeout):
+        return _subprocess.CompletedProcess(args=args, returncode=2, stdout=b"", stderr=b"err")
+
+    monkeypatch.setattr("mcs.adapters.hermes_client.subprocess.run", fake_run)
+    assert pin_skill("nope") is False
+
+
+def test_pin_skill_swallows_missing_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcs.adapters.hermes_client import pin_skill
+
+    def boom(*args, **kwargs):
+        raise FileNotFoundError("no hermes on PATH")
+
+    monkeypatch.setattr("mcs.adapters.hermes_client.subprocess.run", boom)
+    assert pin_skill("entity-extract") is False
+
+
+def test_pin_skill_swallows_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcs.adapters.hermes_client import pin_skill
+    import subprocess as _subprocess
+
+    def slow(*args, **kwargs):
+        raise _subprocess.TimeoutExpired(cmd="hermes", timeout=10)
+
+    monkeypatch.setattr("mcs.adapters.hermes_client.subprocess.run", slow)
+    assert pin_skill("entity-extract") is False
+
+
+def test_pin_skill_empty_slug_short_circuits() -> None:
+    from mcs.adapters.hermes_client import pin_skill
+    assert pin_skill("") is False

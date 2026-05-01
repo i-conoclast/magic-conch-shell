@@ -700,6 +700,14 @@ def spawn_kr_agent(
         ),
         encoding="utf-8",
     )
+
+    # Hermes 0.12 Curator auto-grades / archives "agent-created" skills,
+    # which includes anything under our external_dirs. Pin per-KR agents
+    # on creation so the Curator can't archive or patch them at the 7-day
+    # tick. Best-effort — Hermes CLI absence shouldn't break the spawn.
+    from mcs.adapters.hermes_client import pin_skill
+    pin_skill(slug)
+
     return skill_path
 
 

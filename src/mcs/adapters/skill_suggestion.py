@@ -230,11 +230,18 @@ def confirm(slug: str, *, target_dir: str = "planner") -> dict[str, Any]:
     )
     sug.path.unlink()
 
+    # Hermes 0.12 Curator auto-grades / archives "agent-created" skills
+    # (anything not bundled or hub-installed). Pin newly-promoted ones
+    # so the Curator can't mutate or archive them later.
+    from mcs.adapters.hermes_client import pin_skill
+    pinned = pin_skill(sug.slug)
+
     return {
         "slug": sug.slug,
         "status": "confirmed",
         "path": str(dest),
         "target_dir": target_dir,
+        "pinned": pinned,
     }
 
 

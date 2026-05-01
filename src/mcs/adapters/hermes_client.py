@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -326,3 +327,34 @@ async def fire_webhook(
         "status_code": r.status_code,
         "error": r.text[:200] if r.text else None,
     }
+
+
+# ─── Curator pin (Hermes 0.12+) ─────────────────────────────────────────
+
+def pin_skill(slug: str, *, timeout: float = 10.0) -> bool:
+    """Best-effort `hermes curator pin <slug>` wrapper.
+
+    Hermes 0.12 ships an autonomous Curator that grades / consolidates /
+    archives "agent-created" skills (anything not bundled or hub-installed).
+    mcs's external skills under `skills/{planner,extractor,objectives}/`
+    fall into that category, so newly-created files are at risk of being
+    auto-mutated 7 days after creation. Pinning a skill opts it out of
+    every auto-transition without disabling the Curator globally.
+
+    This helper is wired into `skill_suggestion.confirm` and
+    `okr.spawn_kr_agent` so promotions and per-KR agents are protected
+    on creation. Failures (missing CLI, non-zero exit, timeout) are
+    swallowed — losing a pin is a soft regression, not worth crashing
+    the calling adapter.
+    """
+    if not slug:
+        return False
+    try:
+        r = subprocess.run(
+            ["hermes", "curator", "pin", slug],
+            capture_output=True,
+            timeout=timeout,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+    return r.returncode == 0
