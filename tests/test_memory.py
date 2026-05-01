@@ -141,9 +141,18 @@ def test_supplement_infers_note_from_domain_path(tmp_brain: Path) -> None:
 def test_supplement_is_idempotent(tmp_brain: Path) -> None:
     (tmp_brain / "signals").mkdir()
     path = tmp_brain / "signals" / "x.md"
-    path.write_text("---\nid: x\ntype: signal\ndomain: null\nentities: []\ncreated_at: '2026-04-22T00:00:00+09:00'\nsource: typed\n---\n\nbody\n", encoding="utf-8")
+    # Phase 9: include matching body_hash so the file is fully supplemented.
+    from mcs.adapters.memory import _body_hash
+    body = "body\n"
+    h = _body_hash(body)
+    path.write_text(
+        f"---\nid: x\ntype: signal\ndomain: null\nentities: []\n"
+        f"created_at: '2026-04-22T00:00:00+09:00'\nsource: typed\n"
+        f"body_hash: {h}\n---\n\n{body}",
+        encoding="utf-8",
+    )
 
-    # All required fields present → no rewrite
+    # All required fields present + hash matches → no rewrite
     assert supplement_frontmatter(path) is False
 
 
@@ -449,12 +458,14 @@ def test_upsert_daily_section_preserves_other_sections(tmp_brain: Path) -> None:
 def test_supplement_fires_entity_backlinks_when_entities_present(tmp_brain: Path) -> None:
     """A watcher-supplemented file with entities frontmatter must auto-link."""
     from mcs.adapters import entity as ent
+    from mcs.adapters.memory import _body_hash
 
     ent.create_draft(kind="people", name="Jane Smith")
     ent.confirm("people/jane-smith")
 
     (tmp_brain / "signals").mkdir()
     path = tmp_brain / "signals" / "2026-05-01-watcher-drop.md"
+    body = "body\n"
     path.write_text(
         "---\n"
         "id: 2026-05-01-watcher-drop\n"
@@ -463,10 +474,11 @@ def test_supplement_fires_entity_backlinks_when_entities_present(tmp_brain: Path
         "entities: [people/jane-smith]\n"
         "created_at: '2026-05-01T00:00:00+09:00'\n"
         "source: file-watcher\n"
-        "---\n\nbody\n",
+        f"body_hash: {_body_hash(body)}\n"
+        f"---\n\n{body}",
         encoding="utf-8",
     )
-    # All required fields present → no rewrite, but backlink should still fire.
+    # Frontmatter complete + hash matches → no rewrite, but backlink fires.
     assert supplement_frontmatter(path) is False
 
     profile = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
@@ -477,11 +489,14 @@ def test_supplement_fires_entity_backlinks_when_entities_present(tmp_brain: Path
 
 def test_supplement_silent_for_missing_entity(tmp_brain: Path) -> None:
     """Unknown entity slug → no error, file written normally."""
+    from mcs.adapters.memory import _body_hash
     (tmp_brain / "signals").mkdir()
     path = tmp_brain / "signals" / "x.md"
+    body = "body\n"
     path.write_text(
         "---\nid: x\ntype: signal\ndomain: null\nentities: [people/no-such]\n"
-        "created_at: '2026-05-01T00:00:00+09:00'\nsource: file-watcher\n---\n\nbody\n",
+        "created_at: '2026-05-01T00:00:00+09:00'\nsource: file-watcher\n"
+        f"body_hash: {_body_hash(body)}\n---\n\n{body}",
         encoding="utf-8",
     )
     # No EntityNotFound bubble-up
@@ -607,11 +622,77 @@ def test_supplement_corrects_id_when_filename_changed(tmp_brain: Path) -> None:
 
 
 def test_supplement_no_rewrite_when_id_matches_stem(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import _body_hash
     (tmp_brain / "signals").mkdir()
     path = tmp_brain / "signals" / "good.md"
+    body = "body\n"
     path.write_text(
         "---\nid: good\ntype: signal\ndomain: null\nentities: []\n"
-        "created_at: '2026-05-01T00:00:00+09:00'\nsource: typed\n---\n\nbody\n",
+        "created_at: '2026-05-01T00:00:00+09:00'\nsource: typed\n"
+        f"body_hash: {_body_hash(body)}\n---\n\n{body}",
         encoding="utf-8",
     )
     assert supplement_frontmatter(path) is False
+
+
+# ─── Phase 9: body_hash re-extract trigger ─────────────────────────────
+
+def test_capture_records_body_hash(tmp_brain: Path) -> None:
+    rec = capture(text="hello body", title="hash-1")
+    meta = _read_meta(rec.path)
+    assert "body_hash" in meta
+    assert len(meta["body_hash"]) == 64  # sha256 hex
+
+
+def test_supplement_no_op_when_body_unchanged(tmp_brain: Path) -> None:
+    """Re-running supplement on a complete file with matching hash → no-op."""
+    rec = capture(text="hello body", title="hash-2")
+    assert supplement_frontmatter(rec.path) is False
+
+
+def test_supplement_rewrites_when_body_changes(tmp_brain: Path) -> None:
+    """Edit the body → next supplement detects hash mismatch and rewrites."""
+    rec = capture(text="original body", title="hash-3")
+    original_hash = _read_meta(rec.path)["body_hash"]
+
+    # Simulate an external edit (Obsidian save with new content).
+    post = frontmatter.load(rec.path)
+    post.content = "completely different body now\n"
+    rec.path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content, **post.metadata)) + "\n",
+        encoding="utf-8",
+    )
+
+    rewritten = supplement_frontmatter(rec.path)
+    assert rewritten is True
+    new_hash = _read_meta(rec.path)["body_hash"]
+    assert new_hash != original_hash
+
+
+def test_supplement_ignores_whitespace_only_changes(tmp_brain: Path) -> None:
+    """Trailing whitespace shouldn't trigger re-extraction (LLM cost guard)."""
+    rec = capture(text="stable body", title="hash-4")
+
+    # Add trailing spaces and a blank line — body content semantically same.
+    post = frontmatter.load(rec.path)
+    post.content = "stable body   \n   \n"
+    rec.path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content, **post.metadata)) + "\n",
+        encoding="utf-8",
+    )
+
+    assert supplement_frontmatter(rec.path) is False
+
+
+def test_supplement_backfills_body_hash_on_legacy_file(tmp_brain: Path) -> None:
+    """Files written before Phase 9 lack body_hash; supplement adds it once."""
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "legacy.md"
+    path.write_text(
+        "---\nid: legacy\ntype: signal\ndomain: null\nentities: []\n"
+        "created_at: '2026-04-01T00:00:00+09:00'\nsource: typed\n---\n\nold body\n",
+        encoding="utf-8",
+    )
+    # Missing body_hash + complete required → still rewrites (= re-fire).
+    assert supplement_frontmatter(path) is True
+    assert "body_hash" in _read_meta(path)

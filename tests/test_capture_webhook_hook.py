@@ -147,14 +147,16 @@ async def test_supplement_fires_webhook_when_rewriting(
 async def test_supplement_skips_webhook_when_no_rewrite(
     tmp_brain: Path, webhook_enabled, webhook_capture: list[dict]
 ) -> None:
-    """File already has full frontmatter → capture() already fired; don't double-fire."""
-    from mcs.adapters.memory import supplement_frontmatter
+    """File already has full frontmatter (incl. body_hash match) → no fire."""
+    from mcs.adapters.memory import supplement_frontmatter, _body_hash
 
     (tmp_brain / "signals").mkdir()
     path = tmp_brain / "signals" / "complete.md"
+    body = "body\n"
     path.write_text(
         "---\nid: complete\ntype: signal\ndomain: null\nentities: []\n"
-        "created_at: '2026-05-01T00:00:00+09:00'\nsource: typed\n---\n\nbody\n",
+        "created_at: '2026-05-01T00:00:00+09:00'\nsource: typed\n"
+        f"body_hash: {_body_hash(body)}\n---\n\n{body}",
         encoding="utf-8",
     )
     rewritten = supplement_frontmatter(path)

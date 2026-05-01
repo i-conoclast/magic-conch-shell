@@ -5,6 +5,7 @@ Cache (`.brain/`) is rebuildable at any time.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,6 +16,20 @@ from zoneinfo import ZoneInfo
 import frontmatter
 
 from mcs.config import load_settings
+
+
+def _body_hash(body: str | None) -> str:
+    """Stable SHA-256 over the body content, normalised for whitespace.
+
+    Trailing whitespace and CRLF differences shouldn't trigger
+    re-extraction, so we strip line-end whitespace before hashing. The
+    resulting hex digest goes into frontmatter as `body_hash` and lets
+    supplement_frontmatter detect "real" content changes vs. cosmetic
+    ones (which keep webhook costs from firing on every save).
+    """
+    text = body or ""
+    normalised = "\n".join(line.rstrip() for line in text.splitlines()).strip()
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -590,6 +605,16 @@ def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
     if not needs_rewrite and meta.get("id") != path.stem:
         needs_rewrite = True
 
+    # Phase 9: re-extract on meaningful body changes. Compare the stored
+    # body_hash with a fresh hash of the live body. Mismatch (or missing
+    # field on a legacy file) → rewrite so the watcher path fires the
+    # entity-extract + domain-classify webhooks again.
+    current_hash = _body_hash(post.content)
+    if not needs_rewrite:
+        stored = meta.get("body_hash")
+        if stored != current_hash:
+            needs_rewrite = True
+
     if needs_rewrite:
         meta["id"] = path.stem  # always derive from the live filename
         meta.setdefault("type", inferred_type)
@@ -601,6 +626,7 @@ def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
             mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=KST)
             meta["created_at"] = mtime.isoformat()
         meta.setdefault("source", source)
+        meta["body_hash"] = current_hash
 
         new_post = frontmatter.Post(post.content, **meta)
         path.write_text(frontmatter.dumps(new_post) + "\n", encoding="utf-8")
@@ -712,6 +738,7 @@ def capture_structured(
 
     meta["id"] = path.stem
     body = assemble_body(tpl)
+    meta["body_hash"] = _body_hash(body)
     post = frontmatter.Post(body, **meta)
     path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
 
@@ -790,7 +817,10 @@ def capture(
     # 파일명과 frontmatter id 정합성 보장
     meta["id"] = path.stem
 
-    post = frontmatter.Post(text.rstrip() + "\n", **meta)
+    body_text = text.rstrip() + "\n"
+    meta["body_hash"] = _body_hash(body_text)
+
+    post = frontmatter.Post(body_text, **meta)
     path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
 
     _apply_entity_backlinks(path, meta["entities"])
