@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mcs.adapters import entity as entity_mod
+from mcs.adapters import skill_suggestion as skill_sug_mod
 
 
 # ─── data ──────────────────────────────────────────────────────────────
@@ -109,11 +110,60 @@ def _reject_entity_draft(item_id: str, *, reason: str | None = None) -> dict[str
 #   _SOURCES[<type>] = (<list_fn>, <confirm_fn>, <reject_fn>)
 # Each list_fn returns list[InboxItem]. confirm/reject take (item_id, **kwargs).
 
+def _list_skill_suggestions() -> list[InboxItem]:
+    out: list[InboxItem] = []
+    for sug in skill_sug_mod.list_drafts():
+        meta = sug.meta or {}
+        bits = []
+        if sug.summary:
+            bits.append(sug.summary)
+        if sug.source_session_id:
+            bits.append(f"session={sug.source_session_id}")
+        suffix = f" — {' · '.join(bits)}" if bits else ""
+        summary = f"{sug.slug} — {sug.name!r}{suffix}"
+        out.append(
+            InboxItem(
+                type="skill-promotion",
+                id=sug.slug,
+                summary=summary,
+                created_at=sug.detected_at,
+                payload={
+                    "slug": sug.slug,
+                    "name": sug.name,
+                    "draft_path": str(sug.path),
+                    "source_session_id": sug.source_session_id,
+                    "summary": sug.summary,
+                },
+            )
+        )
+    return out
+
+
+def _confirm_skill_suggestion(
+    item_id: str, *, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    target_dir = "planner"
+    if extra and "target_dir" in extra:
+        target_dir = str(extra["target_dir"])
+    return skill_sug_mod.confirm(item_id, target_dir=target_dir)
+
+
+def _reject_skill_suggestion(
+    item_id: str, *, reason: str | None = None
+) -> dict[str, Any]:
+    return skill_sug_mod.reject(item_id, reason=reason)
+
+
 _SOURCES: dict[str, tuple] = {
     "entity-draft": (
         _list_entity_drafts,
         _confirm_entity_draft,
         _reject_entity_draft,
+    ),
+    "skill-promotion": (
+        _list_skill_suggestions,
+        _confirm_skill_suggestion,
+        _reject_skill_suggestion,
     ),
 }
 

@@ -9,6 +9,7 @@ from mcs.commands.capture import capture_cmd
 from mcs.commands.daemon import app as daemon_app
 from mcs.commands.entity import app as entity_app
 from mcs.commands.inbox import app as inbox_app
+from mcs.commands.skill import app as skill_app
 from mcs.commands.log import log_cmd
 from mcs.commands.okr import app as okr_app
 from mcs.commands.retro import retro_cmd
@@ -48,6 +49,7 @@ app.command(name="retro", help="Run evening retro + capture-KR sync (FR-D3).")(r
 app.add_typer(okr_app, name="okr")
 app.add_typer(entity_app, name="entity")
 app.add_typer(inbox_app, name="inbox")
+app.add_typer(skill_app, name="skill")
 app.add_typer(daemon_app, name="daemon")
 
 

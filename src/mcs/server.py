@@ -906,6 +906,11 @@ async def memory_inbox_act(
         return {"error": str(e)}
     except entity_mod.EntityError as e:
         return {"error": str(e)}
+    except Exception as e:
+        # Skill-suggestion errors and any other adapter exception surface
+        # as {error} so the inbox-approve skill can keep going on the
+        # next directive instead of crashing the whole REPL turn.
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 @mcp.tool(
