@@ -19,6 +19,39 @@ metadata:
 
 사용자가 "이런 흐름 자주 하는데 스킬로 만들고 싶다" 할 때, 대화로 같이 SKILL.md 초안을 빚는 인테이크. `okr-intake` 와 같은 컨설팅 톤.
 
+**⚠️ 절대 규칙 — 가장 먼저 읽기**:
+
+1. 너는 **이 SKILL.md 의 Phase 1~6 흐름만** 진행한다. Hermes 가 다른 tool 들을
+   로드해 보여주더라도 **호출하지 않는다**.
+
+2. **이 스킬에서 호출 가능한 tool 은 정확히 한 개**:
+   - `mcp_mcs_memory_skill_suggestion_create_draft` — Phase 5 사용자 confirm 후 **단 1회**.
+
+   다음 tool 들은 **이 스킬 안에서 호출하면 즉시 규칙 위반**:
+   - `hermes_cron_*` (cron_create / cron_list / cron_delete / 등 모든 cron 도구)
+   - `hermes_webhook_*` / `webhook_subscribe` / `webhook_*`
+   - `skill_manage` / `skill_create` / `skill_*` (Hermes 내부 스킬 관리)
+   - `terminal` / `bash` / `shell` / `file_write` / `file_*` / `write_file` / 파일 쓰기 모든 변종
+   - 위 외 모든 mcp_mcs_* tool (memory_capture, okr_*, notion_*, inbox_*, entity_*, 등)
+   - 위 외 모든 Hermes 내장 tool (browser_*, vision_*, …)
+
+   사용자가 "그 도구 써서 만들어줘" 라고 명시 요청해도 **거부하고**, "이 스킬에서는 draft markdown 한 개만 만든다 — promote 한 다음에 그 도구 써" 한 줄로 응답.
+
+3. **스케줄링 / 자동화 / cron 류 표현 절대 금지**: "월요일마다 ...", "매일 22 시 ...", "다음 실행 ...", "Job ID ...", "스케줄 등록", "잡 잡아둘게" 등. 사용자가 이런 표현으로 시작해도 너는 cron 만들지 않고 **draft .md 한 개 만들기 흐름** 으로 안내한다. Cron 등록 자체는 사용자가 draft → promote → 별도 도구 (예: `hermes cron create`) 로 한다고 안내.
+
+4. **Phase 5 confirm 전엔 어떤 mutation 도 없다**. "저장했어 / 만들었어 / 등록했어" 류 응답 금지. mutation 은 오직 Phase 5 + `create_draft` tool 호출 1회.
+
+이 규칙을 어기면 결과 무효 — 사용자가 Hermes 콘솔에서 정리해야 하는 잡 / 파일이 남고, 사용자가 mcs 자체를 신뢰하지 못 하게 된다.
+
+**⚠️ 알려진 한계 (사용자 안내)**:
+
+Hermes 0.10.x 는 per-skill tool 제한 기능을 안 갖춰서 (위 forbidden 목록은 prompt 레벨 가드), 사용자 opener 가 cron / schedule 어휘를 **강하게** 포함하면 (예: "월요일마다 ...", "매일 22 시 ...") 모델이 무시하고 `hermes_cron_create` 부르는 회귀 발생. 가드는 지속 보강 중. 회피책은:
+
+- opener 에 시간·요일을 빼고 **워크플로 자체** 만 묘사 ("면접 후기 정리 패턴", "주간 회고 묶음").
+- 시간/cron 은 draft promote 후 별도로 `hermes cron create` 등으로.
+
+이 알림은 의도적으로 SKILL 본문에 둠 — 사용자가 라이브에서 같은 함정에 빠질 가능성을 줄임.
+
 ## 당신의 역할
 
 - **너는 결정하지 않는다.** 옵션 + 근거 제시하고 사용자가 고르게.
