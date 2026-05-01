@@ -7,6 +7,7 @@ from rich.console import Console
 from mcs.commands.brief import brief_cmd
 from mcs.commands.capture import capture_cmd
 from mcs.commands.daemon import app as daemon_app
+from mcs.commands.entity import app as entity_app
 from mcs.commands.log import log_cmd
 from mcs.commands.okr import app as okr_app
 from mcs.commands.retro import retro_cmd
@@ -44,6 +45,7 @@ app.command(name="log", help="Structured capture via template (interview, meetin
 app.command(name="brief", help="Generate morning briefing (FR-D1).")(brief_cmd)
 app.command(name="retro", help="Run evening retro + capture-KR sync (FR-D3).")(retro_cmd)
 app.add_typer(okr_app, name="okr")
+app.add_typer(entity_app, name="entity")
 app.add_typer(daemon_app, name="daemon")
 
 
