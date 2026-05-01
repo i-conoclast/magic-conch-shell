@@ -457,10 +457,16 @@ def _infer_type_and_domain(brain: Path, path: Path) -> tuple[str, str | None]:
 def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
     """Fill in missing frontmatter fields on an existing brain/ markdown file.
 
-    Writes the file in-place when any required field is missing. Idempotent:
-    returns False if the file already has every required field.
+    Writes the file in-place when any required field is missing.
+    Returns True if the file was rewritten, False otherwise.
 
     Required fields: id, type, domain, entities, created_at, source.
+
+    Side effect (FR-C4.2 watcher path): regardless of whether anything
+    was rewritten, any `entities` slug in the (final) frontmatter has
+    `add_backlink` invoked for it. add_backlink is idempotent and a
+    silent no-op when the entity profile doesn't yet exist, so the worst
+    case is one stat() per slug per watcher event.
     """
     settings = load_settings()
     brain = settings.brain_dir.resolve()
@@ -479,23 +485,25 @@ def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
 
     meta = dict(post.metadata or {})
     required = ("id", "type", "domain", "entities", "created_at", "source")
-    if all(k in meta for k in required):
-        return False
+    rewritten = False
+    if not all(k in meta for k in required):
+        meta.setdefault("id", path.stem)
+        meta.setdefault("type", inferred_type)
+        # domain may legitimately be None for signals; setdefault is fine.
+        if "domain" not in meta:
+            meta["domain"] = inferred_domain
+        meta.setdefault("entities", [])
+        if "created_at" not in meta:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=KST)
+            meta["created_at"] = mtime.isoformat()
+        meta.setdefault("source", source)
 
-    meta.setdefault("id", path.stem)
-    meta.setdefault("type", inferred_type)
-    # domain may legitimately be None for signals; setdefault is fine.
-    if "domain" not in meta:
-        meta["domain"] = inferred_domain
-    meta.setdefault("entities", [])
-    if "created_at" not in meta:
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=KST)
-        meta["created_at"] = mtime.isoformat()
-    meta.setdefault("source", source)
+        new_post = frontmatter.Post(post.content, **meta)
+        path.write_text(frontmatter.dumps(new_post) + "\n", encoding="utf-8")
+        rewritten = True
 
-    new_post = frontmatter.Post(post.content, **meta)
-    path.write_text(frontmatter.dumps(new_post) + "\n", encoding="utf-8")
-    return True
+    _apply_entity_backlinks(path, meta.get("entities") or [])
+    return rewritten
 
 
 def capture_structured(

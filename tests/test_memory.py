@@ -442,3 +442,47 @@ def test_upsert_daily_section_preserves_other_sections(tmp_brain: Path) -> None:
     assert "morning v2" in body
     assert "evening v1" in body   # evening section intact
     assert "morning v1" not in body
+
+
+# ─── FR-C4.2: watcher entity backlink hook ─────────────────────────────
+
+def test_supplement_fires_entity_backlinks_when_entities_present(tmp_brain: Path) -> None:
+    """A watcher-supplemented file with entities frontmatter must auto-link."""
+    from mcs.adapters import entity as ent
+
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "2026-05-01-watcher-drop.md"
+    path.write_text(
+        "---\n"
+        "id: 2026-05-01-watcher-drop\n"
+        "type: signal\n"
+        "domain: null\n"
+        "entities: [people/jane-smith]\n"
+        "created_at: '2026-05-01T00:00:00+09:00'\n"
+        "source: file-watcher\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
+    # All required fields present → no rewrite, but backlink should still fire.
+    assert supplement_frontmatter(path) is False
+
+    profile = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    auto = profile.split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
+    lines = [ln for ln in auto.strip().splitlines() if ln.strip()]
+    assert any("watcher-drop" in ln for ln in lines)
+
+
+def test_supplement_silent_for_missing_entity(tmp_brain: Path) -> None:
+    """Unknown entity slug → no error, file written normally."""
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "x.md"
+    path.write_text(
+        "---\nid: x\ntype: signal\ndomain: null\nentities: [people/no-such]\n"
+        "created_at: '2026-05-01T00:00:00+09:00'\nsource: file-watcher\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    # No EntityNotFound bubble-up
+    assert supplement_frontmatter(path) is False
