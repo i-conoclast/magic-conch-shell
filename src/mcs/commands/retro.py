@@ -1,4 +1,4 @@
-"""`mcs retro [date]` — evening retro narrative + entity inbox + capture-KR sync.
+"""`mcs retro [date]` — evening retro narrative + suggestion inbox + capture-KR sync.
 
 Three-phase orchestration mirroring `mcs brief`:
 
@@ -6,9 +6,9 @@ Three-phase orchestration mirroring `mcs brief`:
     → composes 4-block narrative (plan ✓/⊘, new context, KR delta,
       one-line tomorrow question), saves brain/daily/…md ## 🌙.
 
-  Phase B: entity-approve skill (interactive REPL, FR-C2)
-    → walks pending entity drafts, parses confirm/reject/defer
-      directives, calls memory.entity_confirm / entity_reject.
+  Phase B: inbox-approve skill (interactive REPL, FR-G3)
+    → walks every pending suggestion (entity drafts, future skill
+      promotions, merge suggestions), dispatches via memory.inbox_act.
     → exits cleanly if the inbox is empty.
 
   Phase C: capture-progress-sync skill (interactive REPL)
@@ -16,7 +16,7 @@ Three-phase orchestration mirroring `mcs brief`:
       approved updates via okr.update_kr + memory.add_okr_link.
 
 Flags:
-  --skip-entity-approve   Skip the FR-C2 inbox phase.
+  --skip-inbox            Skip the FR-G3 inbox phase.
   --skip-sync             Skip the capture-KR sync REPL.
   --raw                   Skip rich markdown rendering for Phase A.
 """
@@ -32,7 +32,7 @@ from mcs.adapters.hermes_client import (
     HermesAuthError,
     HermesError,
     HermesUnreachable,
-    entity_approve_session_name,
+    inbox_approve_session_name,
     retro_session_name,
     run_skill,
     sync_session_name,
@@ -97,8 +97,8 @@ def _looks_empty_inbox(reply: str) -> bool:
     return any(m in low for m in _EMPTY_INBOX_MARKERS)
 
 
-def _run_entity_approve_phase(date: str | None) -> None:
-    session = entity_approve_session_name(date)
+def _run_inbox_approve_phase(date: str | None) -> None:
+    session = inbox_approve_session_name(date)
     opener = date if date else "today"
 
     console.print()
@@ -116,17 +116,17 @@ def _run_entity_approve_phase(date: str | None) -> None:
             try:
                 user_msg = typer.prompt("you", default="", show_default=False)
             except (KeyboardInterrupt, EOFError):
-                console.print("\n[dim]entity-approve ended.[/dim]")
+                console.print("\n[dim]inbox-approve ended.[/dim]")
                 return
 
         if not user_msg.strip() or user_msg.strip().lower() in _EXIT_WORDS:
-            console.print("[dim]entity-approve ended.[/dim]")
+            console.print("[dim]inbox-approve ended.[/dim]")
             return
 
         try:
             result = asyncio.run(
                 run_skill(
-                    skill="entity-approve",
+                    skill="inbox-approve",
                     opener=user_msg,
                     conversation=session,
                     timeout=240.0,
@@ -142,7 +142,7 @@ def _run_entity_approve_phase(date: str | None) -> None:
             console.print(f"[red]✗[/red] {e}")
             raise typer.Exit(code=1) from e
         except KeyboardInterrupt:
-            console.print("\n[dim]entity-approve interrupted.[/dim]")
+            console.print("\n[dim]inbox-approve interrupted.[/dim]")
             return
 
         reply = (result.get("text") or "").strip()
@@ -228,9 +228,9 @@ def retro_cmd(
     date: str | None = typer.Argument(
         None, help="KST date (YYYY-MM-DD). Default: today.",
     ),
-    skip_entity_approve: bool = typer.Option(
-        False, "--skip-entity-approve",
-        help="Skip the FR-C2 entity drafts inbox.",
+    skip_inbox: bool = typer.Option(
+        False, "--skip-inbox",
+        help="Skip the FR-G3 suggestion inbox phase.",
     ),
     skip_sync: bool = typer.Option(
         False, "--skip-sync",
@@ -243,7 +243,7 @@ def retro_cmd(
 ) -> None:
     """Run evening retro → entity drafts inbox → capture-KR sync."""
     _run_retro_phase(date, raw)
-    if not skip_entity_approve:
-        _run_entity_approve_phase(date)
+    if not skip_inbox:
+        _run_inbox_approve_phase(date)
     if not skip_sync:
         _run_sync_phase(date)

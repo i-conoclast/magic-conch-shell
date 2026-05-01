@@ -140,18 +140,18 @@ def retro_session_name(date: str | None = None, *, now: datetime | None = None) 
     return f"evening-retro-{n.strftime('%Y-%m-%d')}"
 
 
-def entity_approve_session_name(date: str | None = None, *, now: datetime | None = None) -> str:
-    """Per-day session for entity-approve.
+def inbox_approve_session_name(date: str | None = None, *, now: datetime | None = None) -> str:
+    """Per-day session for inbox-approve (FR-G3).
 
-    Drafts persist across days; the per-day session just keeps deferred
-    items in the same conversation thread when the user re-runs `mcs retro`
-    on the same date. Next-day invocations start fresh — the inbox is
-    rebuilt from `memory.entity_list_drafts` either way.
+    Inbox items persist across days; the per-day session just keeps
+    deferred items in the same conversation thread when the user re-runs
+    `mcs retro` on the same date. Next-day invocations start fresh —
+    the inbox is rebuilt from `memory.inbox_list` either way.
     """
     if date:
-        return f"entity-approve-{date}"
+        return f"inbox-approve-{date}"
     n = now or datetime.now(_KST)
-    return f"entity-approve-{n.strftime('%Y-%m-%d')}"
+    return f"inbox-approve-{n.strftime('%Y-%m-%d')}"
 
 
 # ─── Response extraction ───────────────────────────────────────────────
