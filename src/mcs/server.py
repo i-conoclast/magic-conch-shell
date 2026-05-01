@@ -35,6 +35,7 @@ from mcs.adapters.memory import (
 from mcs.adapters import entity as entity_mod
 from mcs.adapters import inbox as inbox_mod
 from mcs.adapters import notion as notion_mod
+from mcs.adapters import skill_suggestion as skill_sug_mod
 from mcs.adapters.notion import (
     CaptureInput,
     DailyTaskInput,
@@ -862,6 +863,37 @@ async def memory_entity_merge(
     except entity_mod.EntityError as e:
         return {"error": str(e)}
     return _entity_ref_dict(ref)
+
+
+@mcp.tool(
+    name="memory.skill_suggestion_create_draft",
+    description=(
+        "Stage a skill-promotion draft under .brain/skill-suggestions/. "
+        "Used by the Hermes skill-intake skill to persist a draft once "
+        "the user confirms in the multi-turn intake flow. Idempotent — "
+        "duplicate slugs return {error}. Returns the draft ref."
+    ),
+)
+async def memory_skill_suggestion_create_draft(
+    name: str,
+    slug: str | None = None,
+    body: str = "",
+    summary: str = "",
+    source_session_id: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        sug = skill_sug_mod.create_draft(
+            slug=slug,
+            name=name,
+            body=body,
+            summary=summary,
+            source_session_id=source_session_id,
+            extra=extra,
+        )
+    except (ValueError, skill_sug_mod.SkillSuggestionError) as e:
+        return {"error": str(e)}
+    return sug.to_dict()
 
 
 @mcp.tool(

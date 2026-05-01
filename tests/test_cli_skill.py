@@ -229,3 +229,44 @@ def test_skill_scan_creates_draft_via_labeler(
     assert result.exit_code == 0
     assert "lunch-log" in result.stdout
     assert "1 created" in result.stdout
+
+
+# ─── Phase 13.1: memory.skill_suggestion_create_draft MCP tool ─────────
+
+@pytest.mark.asyncio
+async def test_skill_create_draft_tool_persists(tmp_brain: Path) -> None:
+    from mcs.server import memory_skill_suggestion_create_draft
+
+    out = await memory_skill_suggestion_create_draft(
+        name="Lunch Log",
+        slug="lunch-log",
+        summary="daily lunch tracking",
+        body="## 트리거\n매일 점심.\n",
+        source_session_id="skill-intake-2026-05-01-x",
+    )
+    assert out["slug"] == "lunch-log"
+    assert out["name"] == "Lunch Log"
+    assert out["summary"] == "daily lunch tracking"
+
+    sug = ss.resolve("lunch-log")
+    assert sug.summary == "daily lunch tracking"
+
+
+@pytest.mark.asyncio
+async def test_skill_create_draft_tool_returns_error_on_duplicate(tmp_brain: Path) -> None:
+    from mcs.server import memory_skill_suggestion_create_draft
+
+    ss.create_draft(slug="dup", name="Dup")
+    out = await memory_skill_suggestion_create_draft(slug="dup", name="Dup")
+    assert "error" in out
+    assert "draft already" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_skill_create_draft_tool_returns_error_on_invalid_slug(
+    tmp_brain: Path,
+) -> None:
+    from mcs.server import memory_skill_suggestion_create_draft
+
+    out = await memory_skill_suggestion_create_draft(name="!!!")  # can't kebab
+    assert "error" in out
