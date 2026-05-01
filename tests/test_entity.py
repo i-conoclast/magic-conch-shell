@@ -177,8 +177,10 @@ def test_add_backlink_inserts_sorted_and_dedupes(tmp_brain: Path) -> None:
     ent.create_draft(kind="people", name="Jane Smith")
     ent.confirm("people/jane-smith")
 
-    older = capture(text="older", domain="career", entities=["people/jane-smith"], title="older-note")
-    newer = capture(text="newer", domain="career", entities=["people/jane-smith"], title="newer-note")
+    # Capture without `entities=` so the auto back-link hook stays silent
+    # — this test exercises add_backlink's own ordering + idempotency.
+    older = capture(text="older", domain="career", title="older-note")
+    newer = capture(text="newer", domain="career", title="newer-note")
     # Force distinct dates so the sort is observable. Same-day ordering
     # isn't a public guarantee; cross-day ordering is.
     older_meta = frontmatter.load(older.path)
@@ -213,8 +215,8 @@ def test_add_backlink_silent_when_entity_missing(tmp_brain: Path) -> None:
 def test_remove_backlink_drops_only_target_line(tmp_brain: Path) -> None:
     ent.create_draft(kind="people", name="Jane Smith")
     ent.confirm("people/jane-smith")
-    a = capture(text="a", domain="career", entities=["people/jane-smith"], title="a")
-    b = capture(text="b", domain="career", entities=["people/jane-smith"], title="b")
+    a = capture(text="a", domain="career", title="a")
+    b = capture(text="b", domain="career", title="b")
     ent.add_backlink("people/jane-smith", a.path)
     ent.add_backlink("people/jane-smith", b.path)
 
@@ -233,11 +235,22 @@ def test_rebuild_backlinks_repopulates_from_records(tmp_brain: Path) -> None:
     ent.create_draft(kind="people", name="Jane Smith")
     ent.confirm("people/jane-smith")
 
-    a = capture(text="a", domain="career", entities=["people/jane-smith"], title="a")
-    b = capture(text="b", domain="ml", entities=["people/jane-smith"], title="b")
+    # No `entities=` so the capture hook doesn't pre-populate; this lets
+    # us assert rebuild really walks brain/ from scratch.
+    a = capture(text="a", domain="career", title="a")
+    b = capture(text="b", domain="ml", title="b")
     capture(text="c", domain="career", title="c")  # no entity link
 
-    # Before rebuild: AUTO section is empty.
+    # Manually mark a and b as referencing the entity in their frontmatter
+    # (simulating either manual `-e` or a future LLM-assigned entity).
+    for rec in (a, b):
+        post = frontmatter.load(rec.path)
+        post["entities"] = ["people/jane-smith"]
+        rec.path.write_text(
+            frontmatter.dumps(frontmatter.Post(post.content, **post.metadata)) + "\n",
+            encoding="utf-8",
+        )
+
     profile_path = tmp_brain / "entities/people/jane-smith.md"
     auto = profile_path.read_text(encoding="utf-8").split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
     assert auto.strip() == ""
@@ -250,6 +263,52 @@ def test_rebuild_backlinks_repopulates_from_records(tmp_brain: Path) -> None:
     assert len(lines) == 2
     rels = [ent._line_rel(ln) for ln in lines]
     assert all(rel and rel.endswith(("-a", "-b")) for rel in rels)
-    # Both source records are unaffected by rebuild.
+    # Source records are unaffected by rebuild.
     assert a.path.exists()
     assert b.path.exists()
+
+
+# ─── capture hook (FR-C3 manual back-link wiring) ──────────────────────
+
+def test_capture_hook_populates_backlinks_when_entity_exists(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    rec = capture(text="hi", domain="career", entities=["people/jane-smith"], title="hi")
+
+    profile = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    auto = profile.split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
+    lines = [ln for ln in auto.strip().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    assert ent._line_rel(lines[0]) == "domains/career/" + rec.path.stem
+
+
+def test_capture_hook_silent_when_entity_missing(tmp_brain: Path) -> None:
+    rec = capture(text="hi", domain="career", entities=["people/no-such"], title="hi")
+    # No raise, capture still produced a valid file.
+    assert rec.path.exists()
+    assert not (tmp_brain / "entities/people/no-such.md").exists()
+
+
+def test_capture_structured_hook_populates_backlinks(tmp_brain: Path) -> None:
+    """capture_structured with entity-ref-list field also runs the hook."""
+    from mcs.adapters.memory import capture_structured
+
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    rec = capture_structured(
+        template="interview-note",
+        fields={
+            "company": "companies/anthropic",
+            "interviewers": "people/jane-smith",
+            "round": "1차",
+            "format": "온라인",
+        },
+        title="anthropic-1st",
+    )
+
+    profile = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    auto = profile.split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
+    lines = [ln for ln in auto.strip().splitlines() if ln.strip()]
+    assert any(rec.path.stem in ln for ln in lines)

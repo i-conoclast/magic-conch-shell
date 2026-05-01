@@ -94,7 +94,9 @@ async def test_get_tool_handles_missing(tmp_brain: Path) -> None:
 async def test_add_backlink_tool_idempotent(tmp_brain: Path) -> None:
     ent.create_draft(kind="people", name="Jane Smith")
     ent.confirm("people/jane-smith")
-    rec = capture(text="x", domain="career", entities=["people/jane-smith"], title="x")
+    # No `entities=` so the capture hook doesn't pre-populate the back-link;
+    # this test verifies the explicit tool call's own idempotency.
+    rec = capture(text="x", domain="career", title="x")
 
     first = await memory_entity_add_backlink("people/jane-smith", str(rec.path))
     second = await memory_entity_add_backlink("people/jane-smith", str(rec.path))
@@ -104,6 +106,6 @@ async def test_add_backlink_tool_idempotent(tmp_brain: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_add_backlink_tool_silent_for_missing_entity(tmp_brain: Path) -> None:
-    rec = capture(text="x", domain="career", entities=["people/no-such"], title="x")
+    rec = capture(text="x", domain="career", title="x")
     out = await memory_entity_add_backlink("people/no-such", str(rec.path))
     assert out == {"added": False}

@@ -590,6 +590,8 @@ def capture_structured(
     post = frontmatter.Post(body, **meta)
     path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
 
+    _apply_entity_backlinks(path, entities)
+
     return CaptureResult(
         path=path,
         id=meta["id"],
@@ -664,4 +666,25 @@ def capture(
     post = frontmatter.Post(text.rstrip() + "\n", **meta)
     path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
 
+    _apply_entity_backlinks(path, meta["entities"])
+
     return CaptureResult(path=path, id=meta["id"], type=meta["type"], domain=domain)
+
+
+def _apply_entity_backlinks(record_path: Path, entity_slugs: Iterable[str]) -> None:
+    """Wire FR-C3 manual back-links from a freshly written record.
+
+    Late-imported to break the entity↔memory module cycle. Silent no-op
+    for any slug whose profile doesn't exist yet — keeps `mcs capture -e
+    people/jane` working before the user has approved Jane's draft.
+    """
+    slugs = [s for s in (entity_slugs or []) if s]
+    if not slugs:
+        return
+    from mcs.adapters import entity as entity_mod
+
+    for slug in slugs:
+        try:
+            entity_mod.add_backlink(slug, record_path)
+        except entity_mod.EntityError:
+            continue
