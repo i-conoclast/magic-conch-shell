@@ -130,11 +130,11 @@ async def _default_search(query: str, *, top_k: int) -> list[search_mod.SearchHi
 async def find_candidates(
     corpus: list[CorpusItem],
     *,
-    similarity_threshold: float = 0.6,
+    similarity_threshold: float = 0.020,
     top_k: int = 8,
     min_cluster_size: int = 4,
     min_time_spread_days: float = 2.0,
-    min_avg_score: float = 0.6,
+    min_avg_score: float = 0.020,
     search_fn: SearchFn | None = None,
 ) -> list[SkillCandidate]:
     """Cluster `corpus` items by ANN-derived similarity.
@@ -143,6 +143,13 @@ async def find_candidates(
     edges above `similarity_threshold` are added to a union-find.
     Components that meet `min_cluster_size`, `min_time_spread_days`,
     and `min_avg_score` are returned as `SkillCandidate`s.
+
+    NOTE on score range: memsearch returns RRF (Reciprocal Rank Fusion)
+    scores, not cosine similarity. RRF with k=60 caps top-1 at ~0.033
+    (1/61 from dense + 1/61 from BM25), and unrelated chunks fall to
+    ~0.016. Defaults are calibrated for this range; do not pass
+    cosine-style thresholds (0.5–0.9) here — the detector will return
+    nothing.
 
     `search_fn` is injectable so tests can drive the algorithm with
     a deterministic neighbour map. When omitted the live memsearch

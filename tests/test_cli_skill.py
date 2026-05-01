@@ -122,3 +122,110 @@ def test_skill_list_cli_json(tmp_brain: Path, runner: CliRunner) -> None:
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert any(item["slug"] == "one" for item in data)
+
+
+# ─── scan (Phase 12.4) ─────────────────────────────────────────────────
+
+def test_skill_scan_no_corpus(tmp_brain: Path, runner: CliRunner) -> None:
+    """Empty brain → graceful "no corpus items in window" message."""
+    result = runner.invoke(app, ["skill", "scan", "--days", "7"])
+    assert result.exit_code == 0
+    assert "no corpus items" in result.stdout
+
+
+def test_skill_scan_no_candidates(tmp_brain: Path, runner: CliRunner) -> None:
+    """Single capture → no candidates pass the gates."""
+    from mcs.adapters.memory import capture
+    capture(text="solo body", title="alone")
+
+    result = runner.invoke(app, ["skill", "scan", "--days", "30"])
+    assert result.exit_code == 0
+    assert "no candidates met the gates" in result.stdout
+
+
+def test_skill_scan_dry_run_with_candidate(
+    tmp_brain: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+) -> None:
+    """Patch the detector to return one candidate; --dry-run skips LLM."""
+    from mcs.adapters import skill_corpus, skill_detector
+    from mcs.commands import skill as skill_cmd
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    fake_candidate = skill_detector.SkillCandidate(
+        seed_id="capture:signals/foo",
+        member_ids=["capture:signals/foo", "capture:signals/bar"],
+        sample_texts=["sample one", "sample two"],
+        avg_score=0.85,
+        earliest=datetime(2026, 4, 28, tzinfo=ZoneInfo("Asia/Seoul")),
+        latest=datetime(2026, 5, 1, tzinfo=ZoneInfo("Asia/Seoul")),
+        edge_count=4,
+        payload={"source_types": ["capture"], "domains": ["career"]},
+    )
+
+    async def fake_find(corpus, **kwargs):
+        return [fake_candidate]
+
+    # Need a non-empty corpus so the early-return doesn't fire.
+    from mcs.adapters.memory import capture
+    capture(text="seed body", title="seed")
+
+    monkeypatch.setattr(skill_cmd.skill_detector, "find_candidates", fake_find)
+
+    result = runner.invoke(app, ["skill", "scan", "--dry-run"])
+    assert result.exit_code == 0
+    assert "Candidates · 1" in result.stdout
+    assert "signals/foo" in result.stdout
+    assert "--dry-run" in result.stdout  # the "skipping LLM" hint
+    # No draft was created.
+    assert ss.list_drafts() == []
+
+
+def test_skill_scan_creates_draft_via_labeler(
+    tmp_brain: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+) -> None:
+    """End-to-end with detector + labeler both stubbed."""
+    from mcs.adapters import skill_detector, skill_labeler
+    from mcs.commands import skill as skill_cmd
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    fake_candidate = skill_detector.SkillCandidate(
+        seed_id="capture:signals/foo",
+        member_ids=["capture:signals/foo"],
+        sample_texts=["x"],
+        avg_score=0.9,
+        earliest=datetime(2026, 4, 28, tzinfo=ZoneInfo("Asia/Seoul")),
+        latest=datetime(2026, 5, 1, tzinfo=ZoneInfo("Asia/Seoul")),
+        edge_count=1,
+        payload={},
+    )
+
+    async def fake_find(corpus, **kwargs):
+        return [fake_candidate]
+
+    async def fake_label(candidates, **kwargs):
+        ss.create_draft(slug="lunch-log", name="Lunch Log")
+        return [
+            skill_labeler.LabeledCandidate(
+                candidate_seed_id="capture:signals/foo",
+                status="created",
+                slug="lunch-log",
+                draft_path=str(ss.resolve("lunch-log").path),
+            )
+        ]
+
+    from mcs.adapters.memory import capture
+    capture(text="seed body", title="seed")
+
+    monkeypatch.setattr(skill_cmd.skill_detector, "find_candidates", fake_find)
+    monkeypatch.setattr(skill_cmd.skill_labeler, "label_candidates", fake_label)
+
+    result = runner.invoke(app, ["skill", "scan"])
+    assert result.exit_code == 0
+    assert "lunch-log" in result.stdout
+    assert "1 created" in result.stdout
