@@ -816,6 +816,25 @@ async def memory_entity_add_backlink(
 
 
 @mcp.tool(
+    name="memory.entity_merge",
+    description=(
+        "Merge active entity `from_slug` into `into_slug` (FR-C5). Same-kind "
+        "only; both must be active. Records referencing `from` are rewritten "
+        "to reference `into`, back-links transfer, `merged_from` audit field "
+        "is appended. Returns the resulting `into` ref or {error}."
+    ),
+)
+async def memory_entity_merge(
+    from_slug: str, into_slug: str
+) -> dict[str, Any]:
+    try:
+        ref = entity_mod.merge(from_slug, into_slug)
+    except entity_mod.EntityError as e:
+        return {"error": str(e)}
+    return _entity_ref_dict(ref)
+
+
+@mcp.tool(
     name="memory.show",
     description="Read a brain/ memo by id or relative path. Returns frontmatter + body.",
 )

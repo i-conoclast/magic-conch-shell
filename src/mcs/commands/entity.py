@@ -114,6 +114,21 @@ async def _do_reject(slug: str, reason: str | None, direct: bool) -> dict[str, A
     )
 
 
+async def _do_merge(
+    from_slug: str, into_slug: str, direct: bool
+) -> dict[str, Any]:
+    if direct:
+        try:
+            ref = entity_mod.merge(from_slug, into_slug)
+        except entity_mod.EntityError as e:
+            return {"error": str(e)}
+        return _ref_to_dict(ref)
+    return await call_tool(
+        "memory.entity_merge",
+        {"from_slug": from_slug, "into_slug": into_slug},
+    )
+
+
 # ─── list ──────────────────────────────────────────────────────────────
 
 @app.command("list")
@@ -262,6 +277,43 @@ def confirm_cmd(
 
 
 # ─── reject ────────────────────────────────────────────────────────────
+
+@app.command("merge")
+def merge_cmd(
+    from_slug: str = typer.Argument(..., help="Source entity (will be deleted)."),
+    into_slug: str = typer.Argument(..., help="Destination entity (kept, augmented)."),
+    yes: bool = typer.Option(
+        False, "-y", "--yes",
+        help="Skip the confirmation prompt.",
+    ),
+    as_json: bool = typer.Option(False, "--json"),
+    direct: bool = typer.Option(False, "--direct"),
+) -> None:
+    """Merge `from` into `into`. Same-kind, both-active only. No undo."""
+    if not yes and not as_json:
+        confirm = typer.confirm(
+            f"merge {from_slug} → {into_slug}? this deletes {from_slug}."
+        )
+        if not confirm:
+            console.print("[dim]cancelled.[/dim]")
+            raise typer.Exit(code=0)
+
+    data = _run(_do_merge(from_slug, into_slug, direct))
+
+    if as_json:
+        typer.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    if "error" in data:
+        console.print(f"[red]✗[/red] {data['error']}")
+        raise typer.Exit(code=4)
+
+    merged_from = (data.get("meta") or {}).get("merged_from") or []
+    console.print(
+        f"[green]✓[/green] merged → {data['qualified']} "
+        f"[dim](merged_from: {', '.join(merged_from)})[/dim]"
+    )
+
 
 @app.command("reject")
 def reject_cmd(

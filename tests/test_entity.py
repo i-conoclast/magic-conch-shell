@@ -352,3 +352,81 @@ def test_capture_structured_hook_populates_backlinks(tmp_brain: Path) -> None:
     auto = profile.split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
     lines = [ln for ln in auto.strip().splitlines() if ln.strip()]
     assert any(rec.path.stem in ln for ln in lines)
+
+
+# ─── merge (FR-C5) ─────────────────────────────────────────────────────
+
+def test_merge_consolidates_records_and_backlinks(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+    ent.create_draft(kind="people", name="J Smith")
+    ent.confirm("people/j-smith")
+
+    a = capture(text="a", domain="career", entities=["people/jane-smith"], title="a")
+    b = capture(text="b", domain="career", entities=["people/j-smith"], title="b")
+
+    ref = ent.merge("people/j-smith", "people/jane-smith")
+    assert ref.qualified == "people/jane-smith"
+    assert not (tmp_brain / "entities/people/j-smith.md").exists()
+
+    # Source record b now points at the canonical slug.
+    b_meta = frontmatter.load(b.path).metadata
+    assert b_meta["entities"] == ["people/jane-smith"]
+
+    # `into` profile gathered both back-links + merged_from audit.
+    into = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    auto = into.split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
+    assert "-a]]" in auto and "-b]]" in auto
+
+    into_meta = frontmatter.load(tmp_brain / "entities/people/jane-smith.md").metadata
+    assert into_meta["merged_from"] == ["people/j-smith"]
+    assert "updated_at" in into_meta
+
+
+def test_merge_refuses_cross_kind(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Acme")
+    ent.confirm("people/acme")
+    ent.create_draft(kind="companies", name="Acme")
+    ent.confirm("companies/acme")
+
+    with pytest.raises(ent.EntityError, match="cross-kind"):
+        ent.merge("people/acme", "companies/acme")
+
+
+def test_merge_refuses_self(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    with pytest.raises(ent.EntityError, match="same entity"):
+        ent.merge("people/jane-smith", "people/jane-smith")
+
+
+def test_merge_refuses_drafts(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")  # still draft
+    ent.create_draft(kind="people", name="J Smith")
+    ent.confirm("people/j-smith")
+
+    with pytest.raises(ent.EntityError, match="draft"):
+        ent.merge("people/jane-smith", "people/j-smith")
+
+
+def test_merge_carries_over_missing_fields_only(tmp_brain: Path) -> None:
+    """`into` wins on field collisions; absent fields are inherited."""
+    ent.create_draft(
+        kind="people", name="Jane S",
+        extra={"role": "Recruiter", "location": "Seoul"},
+    )
+    ent.confirm("people/jane-s")
+    ent.create_draft(
+        kind="people", name="Jane Smith",
+        extra={"role": "Senior Recruiter"},  # collision
+    )
+    ent.confirm("people/jane-smith")
+
+    ent.merge("people/jane-s", "people/jane-smith")
+
+    meta = frontmatter.load(tmp_brain / "entities/people/jane-smith.md").metadata
+    # `into` value of role wins
+    assert meta["role"] == "Senior Recruiter"
+    # location only existed on `from` → inherited
+    assert meta["location"] == "Seoul"

@@ -143,3 +143,53 @@ def test_reject_active_returns_error(tmp_brain: Path, runner: CliRunner) -> None
         app, ["entity", "reject", "people/jane-smith", "--direct"]
     )
     assert result.exit_code != 0
+
+
+# ─── merge (FR-C5) ─────────────────────────────────────────────────────
+
+def test_merge_consolidates_via_cli(tmp_brain: Path, runner: CliRunner) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+    ent.create_draft(kind="people", name="J Smith")
+    ent.confirm("people/j-smith")
+
+    result = runner.invoke(
+        app,
+        ["entity", "merge", "people/j-smith", "people/jane-smith", "-y", "--direct"],
+    )
+    assert result.exit_code == 0
+    assert "merged → people/jane-smith" in result.stdout
+    assert not (tmp_brain / "entities/people/j-smith.md").exists()
+
+
+def test_merge_cancel_at_prompt(tmp_brain: Path, runner: CliRunner) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+    ent.create_draft(kind="people", name="J Smith")
+    ent.confirm("people/j-smith")
+
+    # Default --no on the prompt aborts the merge.
+    result = runner.invoke(
+        app,
+        ["entity", "merge", "people/j-smith", "people/jane-smith", "--direct"],
+        input="n\n",
+    )
+    assert result.exit_code == 0
+    assert "cancelled" in result.stdout
+    # Both entities still exist.
+    assert (tmp_brain / "entities/people/j-smith.md").exists()
+    assert (tmp_brain / "entities/people/jane-smith.md").exists()
+
+
+def test_merge_cross_kind_returns_error(tmp_brain: Path, runner: CliRunner) -> None:
+    ent.create_draft(kind="people", name="Acme")
+    ent.confirm("people/acme")
+    ent.create_draft(kind="companies", name="Acme")
+    ent.confirm("companies/acme")
+
+    result = runner.invoke(
+        app,
+        ["entity", "merge", "people/acme", "companies/acme", "-y", "--direct"],
+    )
+    assert result.exit_code != 0
+    assert "cross-kind" in result.stdout

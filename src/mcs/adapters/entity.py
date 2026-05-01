@@ -516,6 +516,119 @@ def _extract_date_key(line: str) -> str:
     return m.group("date") if m else ""
 
 
+def _records_referencing(slug: str) -> list[Path]:
+    """Yield brain/ records whose frontmatter `entities` list contains `slug`."""
+    settings = load_settings()
+    brain = settings.brain_dir.resolve()
+    out: list[Path] = []
+    for sub in ("signals", "domains", "daily", "plans"):
+        root = brain / sub
+        if not root.exists():
+            continue
+        for record in root.rglob("*.md"):
+            try:
+                post = frontmatter.load(record)
+            except Exception:
+                continue
+            entities = list((post.metadata or {}).get("entities") or [])
+            if slug in entities:
+                out.append(record)
+    return out
+
+
+def merge(from_query: str, into_query: str) -> EntityRef:
+    """Merge `from` entity into `into` (FR-C5).
+
+    Rules:
+    - Both must resolve to *active* entities (drafts must be confirmed
+      first — merging a draft would silently promote it).
+    - Cross-kind merges are refused (people↔companies, etc.).
+    - `into` wins on frontmatter collisions; `merged_from` is appended.
+    - All records whose `entities` list contains `from.qualified` get
+      rewritten to point at `into.qualified`. Their back-links are
+      transferred (added to `into`, removed from `from`).
+    - `from`'s profile is deleted last; the JSONL log is *not* touched
+      (we're consolidating, not rejecting).
+
+    Undo is intentionally not supported in v0 — the `merged_from` audit
+    field plus git history of the brain/ directory are the recovery path.
+    """
+    from_ref = resolve_entity(from_query)
+    into_ref = resolve_entity(into_query)
+
+    if from_ref.status != "active":
+        raise EntityError(
+            f"refuse to merge a draft ({from_ref.qualified}); "
+            f"confirm or reject it first."
+        )
+    if into_ref.status != "active":
+        raise EntityError(
+            f"refuse to merge into a draft ({into_ref.qualified}); "
+            f"confirm it first."
+        )
+    if from_ref.qualified == into_ref.qualified:
+        raise EntityError("from and into are the same entity.")
+    if from_ref.kind != into_ref.kind:
+        raise EntityError(
+            f"cross-kind merge blocked: {from_ref.qualified} → "
+            f"{into_ref.qualified}. Use a same-kind target."
+        )
+
+    # 1) Rewrite every record that references from.qualified.
+    from_q = from_ref.qualified
+    into_q = into_ref.qualified
+    for record in _records_referencing(from_q):
+        post = frontmatter.load(record)
+        meta = dict(post.metadata or {})
+        entities = list(meta.get("entities") or [])
+        # Replace; dedupe in case the record already had into too.
+        new_entities = []
+        for e in entities:
+            replaced = into_q if e == from_q else e
+            if replaced not in new_entities:
+                new_entities.append(replaced)
+        meta["entities"] = new_entities
+        record.write_text(
+            frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+            encoding="utf-8",
+        )
+        # Move the back-link entry from from-profile to into-profile.
+        # Order matters: add first so a crash doesn't drop the link.
+        add_backlink(into_q, record)
+
+    # 2) Merge frontmatter into `into`, then write.
+    from_post = frontmatter.load(from_ref.path)
+    into_post = frontmatter.load(into_ref.path)
+    from_meta = dict(from_post.metadata or {})
+    into_meta = dict(into_post.metadata or {})
+
+    # Carry over fields that `into` doesn't already have. Don't clobber.
+    for k, v in from_meta.items():
+        if k in {"kind", "slug", "name", "status", "created_at", "updated_at",
+                 "detected_at", "detection_confidence", "promoted_from",
+                 "merged_from"}:
+            continue
+        into_meta.setdefault(k, v)
+
+    merged_from = list(into_meta.get("merged_from") or [])
+    if from_q not in merged_from:
+        merged_from.append(from_q)
+    into_meta["merged_from"] = merged_from
+    into_meta["updated_at"] = now_kst().isoformat()
+
+    into_ref.path.write_text(
+        frontmatter.dumps(
+            frontmatter.Post(into_post.content or "", **into_meta)
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    # 3) Delete the source profile last.
+    from_ref.path.unlink()
+
+    return _load_ref(into_ref.path, kind=into_ref.kind, slug=into_ref.slug, draft=False)
+
+
 def rebuild_backlinks() -> int:
     """Clear every entity's AUTO section and re-derive from brain/ records.
 
@@ -561,6 +674,7 @@ __all__ = [
     "entity_exists",
     "list_drafts",
     "list_entities",
+    "merge",
     "rebuild_backlinks",
     "reject",
     "remove_backlink",
