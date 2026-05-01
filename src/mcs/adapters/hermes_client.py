@@ -10,6 +10,9 @@ Hermes drives the agent loop. We only supply the transport.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +25,7 @@ import httpx
 _KST = ZoneInfo("Asia/Seoul")
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8642
+_DEFAULT_WEBHOOK_PORT = 8644
 
 
 # ─── Errors ─────────────────────────────────────────────────────────────
@@ -45,6 +49,19 @@ def gateway_url() -> str:
     host = os.environ.get("HERMES_HOST", _DEFAULT_HOST)
     port = os.environ.get("HERMES_PORT", str(_DEFAULT_PORT))
     return f"http://{host}:{port}"
+
+
+def webhook_url(route: str) -> str:
+    """Resolve a webhook subscription URL.
+
+    Hermes's webhook adapter listens on its own port (default 8644) and
+    routes to subscriptions under `/webhooks/<name>`.
+    """
+    host = os.environ.get("HERMES_WEBHOOK_HOST") or os.environ.get(
+        "HERMES_HOST", _DEFAULT_HOST
+    )
+    port = os.environ.get("HERMES_WEBHOOK_PORT", str(_DEFAULT_WEBHOOK_PORT))
+    return f"http://{host}:{port}/webhooks/{route}"
 
 
 def api_key() -> str:
@@ -215,4 +232,71 @@ async def run_skill(
         "text": _extract_text(data),
         "conversation": conversation,
         "raw": data,
+    }
+
+
+# ─── Webhook fire-and-forget ───────────────────────────────────────────
+
+def _sign_webhook_body(secret: str, body: bytes) -> str:
+    """Compute the X-Webhook-Signature value for a Hermes generic route.
+
+    Generic webhook routes expect the raw HMAC-SHA256 hex digest of the
+    request body, signed with the route's per-subscription secret.
+    """
+    return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+
+async def fire_webhook(
+    route: str,
+    payload: dict[str, Any],
+    *,
+    secret: str,
+    timeout: float = 5.0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
+    """POST a JSON payload to a Hermes webhook subscription, never raises.
+
+    Returns a result dict — `{ok: bool, status_code: int | None,
+    error: str | None}` — so daemon-side callers can swallow failures
+    without try/except boilerplate. Use this from
+    `asyncio.create_task(...)` for fire-and-forget event triggers.
+
+    Args:
+        route:    Subscription name, e.g. "entity-extract".
+        payload:  Arbitrary JSON-serialisable dict.
+        secret:   Per-subscription HMAC secret. Required — the adapter
+                  refuses to start a route without one, so callers must
+                  fail loudly in misconfiguration paths upstream rather
+                  than silently sending unsigned events.
+        timeout:  Per-request timeout. Default 5s — webhook fire is
+                  meant to be quick; slow LLM work happens behind the
+                  Hermes runtime, not on this leg.
+        transport: Optional httpx transport (used by tests for mocks).
+    """
+    if not secret:
+        return {"ok": False, "status_code": None, "error": "missing secret"}
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Webhook-Signature": _sign_webhook_body(secret, body),
+    }
+
+    url = webhook_url(route)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, transport=transport) as c:
+            r = await c.post(url, content=body, headers=headers)
+    except httpx.ConnectError as e:
+        return {"ok": False, "status_code": None, "error": f"connect: {e}"}
+    except httpx.ReadTimeout as e:
+        return {"ok": False, "status_code": None, "error": f"timeout: {e}"}
+    except httpx.HTTPError as e:
+        return {"ok": False, "status_code": None, "error": f"http: {e}"}
+
+    if 200 <= r.status_code < 300:
+        return {"ok": True, "status_code": r.status_code, "error": None}
+    return {
+        "ok": False,
+        "status_code": r.status_code,
+        "error": r.text[:200] if r.text else None,
     }

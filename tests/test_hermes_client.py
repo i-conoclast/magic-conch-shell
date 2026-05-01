@@ -211,3 +211,99 @@ async def test_run_skill_roundtrip_no_skill() -> None:
     )
     assert out["status"] == "completed"
     assert isinstance(out["text"], str)
+
+
+# ─── Webhook helper ─────────────────────────────────────────────────────
+
+import hashlib
+import hmac
+import json as _json
+
+import httpx as _httpx
+
+from mcs.adapters.hermes_client import (
+    _sign_webhook_body,
+    fire_webhook,
+    webhook_url,
+)
+
+
+def test_webhook_url_default_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HERMES_WEBHOOK_HOST", raising=False)
+    monkeypatch.delenv("HERMES_WEBHOOK_PORT", raising=False)
+    monkeypatch.delenv("HERMES_HOST", raising=False)
+    assert webhook_url("entity-extract") == "http://127.0.0.1:8644/webhooks/entity-extract"
+
+
+def test_webhook_url_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HERMES_WEBHOOK_HOST", "10.0.0.7")
+    monkeypatch.setenv("HERMES_WEBHOOK_PORT", "9999")
+    assert webhook_url("foo") == "http://10.0.0.7:9999/webhooks/foo"
+
+
+def test_sign_webhook_body_matches_python_reference() -> None:
+    body = b'{"capture_id":"test"}'
+    expected = hmac.new(b"secret", body, hashlib.sha256).hexdigest()
+    assert _sign_webhook_body("secret", body) == expected
+
+
+@pytest.mark.asyncio
+async def test_fire_webhook_signs_body_and_returns_ok() -> None:
+    captured: dict = {}
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = request.content
+        captured["sig"] = request.headers.get("X-Webhook-Signature")
+        return _httpx.Response(204)
+
+    out = await fire_webhook(
+        "entity-extract",
+        {"capture_id": "2026-05-01-foo", "domain": "career"},
+        secret="topsecret",
+        transport=_httpx.MockTransport(handler),
+    )
+
+    assert out == {"ok": True, "status_code": 204, "error": None}
+    assert captured["url"].endswith("/webhooks/entity-extract")
+    assert captured["sig"] == hmac.new(
+        b"topsecret", captured["body"], hashlib.sha256
+    ).hexdigest()
+    # body must be valid JSON and contain our payload
+    assert _json.loads(captured["body"])["capture_id"] == "2026-05-01-foo"
+
+
+@pytest.mark.asyncio
+async def test_fire_webhook_returns_error_on_non_2xx() -> None:
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        return _httpx.Response(401, text="bad sig")
+
+    out = await fire_webhook(
+        "entity-extract",
+        {"x": 1},
+        secret="topsecret",
+        transport=_httpx.MockTransport(handler),
+    )
+
+    assert out["ok"] is False
+    assert out["status_code"] == 401
+    assert "bad sig" in (out["error"] or "")
+
+
+@pytest.mark.asyncio
+async def test_fire_webhook_returns_error_on_connect_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HERMES_WEBHOOK_PORT", "1")
+    out = await fire_webhook(
+        "entity-extract", {}, secret="x", timeout=0.5
+    )
+    assert out["ok"] is False
+    assert out["status_code"] is None
+    assert "connect" in (out["error"] or "")
+
+
+@pytest.mark.asyncio
+async def test_fire_webhook_refuses_empty_secret() -> None:
+    out = await fire_webhook("entity-extract", {}, secret="")
+    assert out == {"ok": False, "status_code": None, "error": "missing secret"}
