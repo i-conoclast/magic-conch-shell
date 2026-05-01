@@ -123,3 +123,32 @@ async def test_add_backlink_tool_silent_for_missing_entity(tmp_brain: Path) -> N
     rec = capture(text="x", domain="career", title="x")
     out = await memory_entity_add_backlink("people/no-such", str(rec.path))
     assert out == {"added": False}
+
+
+# ─── memory.set_domain (Phase 7.1) — colocated since domain layer's a sibling concern ─
+
+@pytest.mark.asyncio
+async def test_set_domain_tool_writes_field(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import capture
+    from mcs.server import memory_set_domain
+
+    rec = capture(text="hi", title="t1")
+    out = await memory_set_domain(rec.id, "career")
+    assert out == {"domain": "career"}
+
+
+@pytest.mark.asyncio
+async def test_set_domain_tool_returns_error_on_invalid(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import capture
+    from mcs.server import memory_set_domain
+
+    rec = capture(text="hi", title="t1")
+    out = await memory_set_domain(rec.id, "bogus-domain")
+    assert "error" in out
+
+
+@pytest.mark.asyncio
+async def test_set_domain_tool_returns_error_on_missing(tmp_brain: Path) -> None:
+    from mcs.server import memory_set_domain
+    out = await memory_set_domain("nonexistent-id", "career")
+    assert "error" in out

@@ -486,3 +486,39 @@ def test_supplement_silent_for_missing_entity(tmp_brain: Path) -> None:
     )
     # No EntityNotFound bubble-up
     assert supplement_frontmatter(path) is False
+
+
+# ─── set_domain (Phase 7.1) ────────────────────────────────────────────
+
+def test_set_domain_overwrites_field(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import set_domain
+    rec = capture(text="hi", title="t1")  # signal, no domain
+    assert _read_meta(rec.path)["domain"] is None
+
+    out = set_domain(rec.id, "career")
+    assert out == "career"
+    assert _read_meta(rec.path)["domain"] == "career"
+
+
+def test_set_domain_clears_with_none(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import set_domain
+    rec = capture(text="hi", domain="career", title="t1")
+    set_domain(rec.id, None)
+    assert _read_meta(rec.path)["domain"] is None
+
+
+def test_set_domain_rejects_unknown(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import set_domain
+    rec = capture(text="hi", title="t1")
+    with pytest.raises(ValueError, match="Unknown domain"):
+        set_domain(rec.id, "not-a-real-domain")
+
+
+def test_set_domain_is_idempotent(tmp_brain: Path) -> None:
+    """Setting same domain leaves the file untouched (no rewrite)."""
+    from mcs.adapters.memory import set_domain
+    rec = capture(text="hi", domain="career", title="t1")
+    mtime_before = rec.path.stat().st_mtime_ns
+    set_domain(rec.id, "career")
+    mtime_after = rec.path.stat().st_mtime_ns
+    assert mtime_before == mtime_after

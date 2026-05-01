@@ -29,6 +29,7 @@ from mcs.adapters.memory import (
     daily_file_path as core_daily_file_path,
     list_captures_by_date as core_list_captures_by_date,
     load_memo,
+    set_domain as core_set_domain,
     upsert_daily_section as core_upsert_daily_section,
 )
 from mcs.adapters import entity as entity_mod
@@ -592,6 +593,27 @@ async def memory_add_okr_link(
     except (MemoNotFound, MemoAmbiguous) as e:
         return {"error": str(e)}
     return {"okrs": merged}
+
+
+@mcp.tool(
+    name="memory.set_domain",
+    description=(
+        f"Overwrite the `domain` frontmatter field on a brain/ record. "
+        f"`domain` must be one of {sorted(DOMAINS)} or null. Idempotent. "
+        f"Used by the Hermes domain-classify skill to persist its "
+        f"inference. Returns {{domain}} or {{error}}."
+    ),
+)
+async def memory_set_domain(
+    capture_id: str, domain: str | None
+) -> dict[str, Any]:
+    try:
+        new_value = core_set_domain(capture_id, domain)
+    except (MemoNotFound, MemoAmbiguous) as e:
+        return {"error": str(e)}
+    except ValueError as e:
+        return {"error": str(e)}
+    return {"domain": new_value}
 
 
 @mcp.tool(

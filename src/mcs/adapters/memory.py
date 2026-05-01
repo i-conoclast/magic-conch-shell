@@ -294,6 +294,36 @@ def list_captures_by_date(
     return out
 
 
+def set_domain(capture_id: str, domain: str | None) -> str | None:
+    """Overwrite the `domain` frontmatter field on an existing brain/ record.
+
+    Validates against the canonical DOMAINS set (None clears the field).
+    Returns the new domain. No filesystem move (a record's path stays
+    where it is — domain is purely a tag).
+
+    This is the write path the Hermes domain-classify skill (FR-A3 / FR-C
+    domain layer) uses to persist its inference. Because it bypasses
+    `capture()`, no entity-extract webhook re-fires from this call —
+    the skill's only side effect is the frontmatter mutation.
+    """
+    if domain is not None and domain not in DOMAINS:
+        raise ValueError(
+            f"Unknown domain {domain!r}. Valid: {sorted(DOMAINS)} or None."
+        )
+
+    path = resolve_memo(capture_id)
+    post = frontmatter.load(path)
+    meta = dict(post.metadata or {})
+    if meta.get("domain") == domain:
+        return domain  # idempotent
+    meta["domain"] = domain
+    path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+        encoding="utf-8",
+    )
+    return domain
+
+
 def add_okr_link(capture_id: str, kr_ids: Iterable[str]) -> list[str]:
     """Append kr_ids to a capture's frontmatter `okrs` field.
 
