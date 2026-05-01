@@ -779,11 +779,19 @@ def _schedule_capture_event_webhooks(
     if not routes:
         return
 
+    import asyncio as _asyncio  # local alias keeps memory.py top imports clean
+    in_thread = False
     try:
-        import asyncio as _asyncio  # local alias keeps memory.py top imports clean
         loop = _asyncio.get_running_loop()
     except RuntimeError:
-        return
+        # No loop in this thread — try the watcher-bound server loop. This
+        # is the path the watchdog observer thread takes when it calls
+        # supplement_frontmatter on a freshly dropped file.
+        from mcs.adapters.watcher import get_main_loop
+        loop = get_main_loop()
+        if loop is None or loop.is_closed():
+            return
+        in_thread = True
 
     payload = {
         "capture_id": capture_id,
@@ -802,6 +810,10 @@ def _schedule_capture_event_webhooks(
             )
 
     for label, route, secret in routes:
-        loop.create_task(_fire(label, route, secret))
+        coro = _fire(label, route, secret)
+        if in_thread:
+            _asyncio.run_coroutine_threadsafe(coro, loop)
+        else:
+            loop.create_task(coro)
 
 

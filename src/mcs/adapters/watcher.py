@@ -45,6 +45,12 @@ def bind_main_loop(loop: asyncio.AbstractEventLoop) -> None:
         _main_loop = loop
 
 
+def get_main_loop() -> asyncio.AbstractEventLoop | None:
+    """Return the bound server loop (None if not yet registered)."""
+    with _loop_lock:
+        return _main_loop
+
+
 def _dispatch(coro: Any, *, timeout: float = 30.0) -> Any:
     """Run a coroutine on the bound main loop from a watcher thread."""
     with _loop_lock:
