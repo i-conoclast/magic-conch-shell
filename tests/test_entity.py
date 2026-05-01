@@ -430,3 +430,69 @@ def test_merge_carries_over_missing_fields_only(tmp_brain: Path) -> None:
     assert meta["role"] == "Senior Recruiter"
     # location only existed on `from` → inherited
     assert meta["location"] == "Seoul"
+
+
+# ─── split (FR-C5) ─────────────────────────────────────────────────────
+
+def test_split_clones_profile_without_records(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Kim", extra={"role": "Engineer"})
+    ent.confirm("people/kim")
+
+    new_ref = ent.split("people/kim", "kim-2", new_name="Kim 2")
+    assert new_ref.qualified == "people/kim-2"
+    meta = frontmatter.load(new_ref.path).metadata
+    assert meta["forked_from"] == "people/kim"
+    assert meta["role"] == "Engineer"
+    assert meta["name"] == "Kim 2"
+
+
+def test_split_moves_record_backlink(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Kim")
+    ent.confirm("people/kim")
+    a = capture(text="kim a", domain="career", entities=["people/kim"], title="kim-a")
+    b = capture(text="kim b", domain="career", entities=["people/kim"], title="kim-b")
+
+    ent.split("people/kim", "kim-2", record_paths=[b.path])
+
+    # Record b's frontmatter now points at kim-2
+    assert frontmatter.load(b.path).metadata["entities"] == ["people/kim-2"]
+    # Record a is untouched
+    assert frontmatter.load(a.path).metadata["entities"] == ["people/kim"]
+
+    # kim's profile lost b's back-link, kept a's
+    src_auto = (tmp_brain / "entities/people/kim.md").read_text(encoding="utf-8").split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
+    assert "-kim-a]]" in src_auto
+    assert "-kim-b]]" not in src_auto
+
+    # kim-2's profile has b's back-link only
+    new_auto = (tmp_brain / "entities/people/kim-2.md").read_text(encoding="utf-8").split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split("<!-- END")[0]
+    assert "-kim-b]]" in new_auto
+    assert "-kim-a]]" not in new_auto
+
+
+def test_split_refuses_existing_slug(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Kim")
+    ent.confirm("people/kim")
+    ent.create_draft(kind="people", name="Kim 2")
+    ent.confirm("people/kim-2")
+
+    with pytest.raises(ent.EntityAlreadyExists):
+        ent.split("people/kim", "kim-2")
+
+
+def test_split_refuses_record_not_referencing_source(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Kim")
+    ent.confirm("people/kim")
+    other = capture(text="unrelated", domain="career", title="other")  # no entities
+
+    with pytest.raises(ent.EntityError, match="doesn't reference"):
+        ent.split("people/kim", "kim-2", record_paths=[other.path])
+
+    # New entity profile must NOT have been written.
+    assert not (tmp_brain / "entities/people/kim-2.md").exists()
+
+
+def test_split_refuses_draft_source(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Kim")  # still draft
+    with pytest.raises(ent.EntityError, match="draft"):
+        ent.split("people/kim", "kim-2")

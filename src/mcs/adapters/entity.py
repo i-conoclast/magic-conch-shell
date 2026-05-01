@@ -629,6 +629,125 @@ def merge(from_query: str, into_query: str) -> EntityRef:
     return _load_ref(into_ref.path, kind=into_ref.kind, slug=into_ref.slug, draft=False)
 
 
+def split(
+    from_query: str,
+    new_slug: str,
+    *,
+    record_paths: Iterable[Path | str] | None = None,
+    new_name: str | None = None,
+    new_kind: str | None = None,
+) -> EntityRef:
+    """Fork a copy of an active entity into `new_slug`, optionally moving records.
+
+    Use cases:
+    - Two real people share a slug ("kim") and need to be separated.
+    - A draft was confirmed too aggressively and one record really
+      belonged to a different entity.
+
+    Behaviour:
+    - Source must be active. Draft → refuse (confirm first).
+    - `new_slug` must not exist as active or draft (any kind).
+    - New profile inherits frontmatter from source minus
+      lifecycle/audit fields (`created_at`, `updated_at`, `merged_from`,
+      `forked_from`); `forked_from: <source.qualified>` is set.
+    - For each `record_paths` entry: rewrite the record's `entities`
+      list (replace source slug with new slug, dedupe), add a back-link
+      on the new profile, remove that line from the source profile.
+    - When `record_paths` is empty, only the profile clone happens.
+    - Returns the new entity ref.
+
+    Refuses if any path in `record_paths` doesn't currently reference
+    the source entity — surfaces as `EntityError` so the caller knows
+    the input list was wrong.
+    """
+    src = resolve_entity(from_query)
+    if src.status != "active":
+        raise EntityError(
+            f"refuse to split a draft ({src.qualified}); confirm first."
+        )
+
+    target_kind = new_kind or src.kind
+    if not target_kind or "/" in target_kind:
+        raise ValueError(f"invalid new_kind {target_kind!r}")
+
+    if entity_exists(f"{target_kind}/{new_slug}"):
+        raise EntityAlreadyExists(
+            f"target {target_kind}/{new_slug} already exists; pick another slug."
+        )
+
+    # Validate record_paths up-front so we don't half-write the new profile
+    # if the user passed a typo.
+    paths = [Path(p) for p in (record_paths or [])]
+    for record in paths:
+        try:
+            post = frontmatter.load(record)
+        except Exception as e:
+            raise EntityError(f"could not read {record}: {e}") from e
+        entities = list((post.metadata or {}).get("entities") or [])
+        if src.qualified not in entities:
+            raise EntityError(
+                f"{record} doesn't reference {src.qualified}; "
+                f"nothing to move."
+            )
+
+    src_post = frontmatter.load(src.path)
+    src_meta = dict(src_post.metadata or {})
+    new_meta: dict[str, Any] = {}
+    skip_fields = {
+        "created_at", "updated_at", "merged_from", "forked_from",
+        "detected_at", "detection_confidence", "promoted_from", "status",
+    }
+    for k, v in src_meta.items():
+        if k in skip_fields:
+            continue
+        new_meta[k] = v
+    new_meta["kind"] = target_kind
+    new_meta["slug"] = new_slug
+    new_meta["name"] = new_name or src_meta.get("name") or new_slug
+    now_iso = now_kst().isoformat()
+    new_meta["created_at"] = now_iso
+    new_meta["updated_at"] = now_iso
+    new_meta["forked_from"] = src.qualified
+
+    new_path = _profile_path(target_kind, new_slug, draft=False)
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    body = (
+        "## Context\n"
+        f"_(forked from {src.qualified} on split — fill in differences)_\n\n"
+        "## Back-links (auto)\n"
+        f"{_AUTO_START}\n"
+        f"{_AUTO_END}\n"
+    )
+    new_path.write_text(
+        frontmatter.dumps(frontmatter.Post(body, **new_meta)) + "\n",
+        encoding="utf-8",
+    )
+    new_q = f"{target_kind}/{new_slug}"
+
+    if paths:
+        for record in paths:
+            post = frontmatter.load(record)
+            meta = dict(post.metadata or {})
+            entities = list(meta.get("entities") or [])
+            new_entities = []
+            for e in entities:
+                replaced = new_q if e == src.qualified else e
+                if replaced not in new_entities:
+                    new_entities.append(replaced)
+            meta["entities"] = new_entities
+            record.write_text(
+                frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+                encoding="utf-8",
+            )
+            add_backlink(new_q, record)
+            remove_backlink(src.qualified, record)
+
+        # Source profile got mutations from remove_backlink which already
+        # bumps updated_at; nothing extra to do.
+
+    return _load_ref(new_path, kind=target_kind, slug=new_slug, draft=False)
+
+
 def rebuild_backlinks() -> int:
     """Clear every entity's AUTO section and re-derive from brain/ records.
 
@@ -679,4 +798,5 @@ __all__ = [
     "reject",
     "remove_backlink",
     "resolve_entity",
+    "split",
 ]

@@ -193,3 +193,38 @@ def test_merge_cross_kind_returns_error(tmp_brain: Path, runner: CliRunner) -> N
     )
     assert result.exit_code != 0
     assert "cross-kind" in result.stdout
+
+
+# ─── split (FR-C5) ─────────────────────────────────────────────────────
+
+def test_split_via_cli_with_record_move(tmp_brain: Path, runner: CliRunner) -> None:
+    from mcs.adapters.memory import capture
+    ent.create_draft(kind="people", name="Kim")
+    ent.confirm("people/kim")
+    rec = capture(text="x", domain="career", entities=["people/kim"], title="kim-x")
+
+    result = runner.invoke(
+        app,
+        [
+            "entity", "split", "people/kim", "kim-2",
+            "--record", str(rec.path),
+            "--name", "Kim 2",
+            "--direct",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "forked → people/kim-2" in result.stdout
+    assert (tmp_brain / "entities/people/kim-2.md").exists()
+
+
+def test_split_existing_slug_via_cli_returns_error(tmp_brain: Path, runner: CliRunner) -> None:
+    ent.create_draft(kind="people", name="Kim")
+    ent.confirm("people/kim")
+    ent.create_draft(kind="people", name="Kim 2")
+    ent.confirm("people/kim-2")
+
+    result = runner.invoke(
+        app, ["entity", "split", "people/kim", "kim-2", "--direct"]
+    )
+    assert result.exit_code != 0
+    assert "already exists" in result.stdout

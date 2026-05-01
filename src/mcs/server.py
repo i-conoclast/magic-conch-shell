@@ -835,6 +835,36 @@ async def memory_entity_merge(
 
 
 @mcp.tool(
+    name="memory.entity_split",
+    description=(
+        "Fork an active entity into `new_slug` (FR-C5). Optional record_paths "
+        "list moves those records' references and back-links to the new "
+        "entity. `forked_from` audit field set on the new profile. Refuses "
+        "drafts, existing target slug, and record paths that don't reference "
+        "the source. Returns the new ref or {error}."
+    ),
+)
+async def memory_entity_split(
+    from_slug: str,
+    new_slug: str,
+    record_paths: list[str] | None = None,
+    new_name: str | None = None,
+    new_kind: str | None = None,
+) -> dict[str, Any]:
+    try:
+        ref = entity_mod.split(
+            from_slug,
+            new_slug,
+            record_paths=record_paths or None,
+            new_name=new_name,
+            new_kind=new_kind,
+        )
+    except (ValueError, entity_mod.EntityError) as e:
+        return {"error": str(e)}
+    return _entity_ref_dict(ref)
+
+
+@mcp.tool(
     name="memory.show",
     description="Read a brain/ memo by id or relative path. Returns frontmatter + body.",
 )

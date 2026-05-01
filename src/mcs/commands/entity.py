@@ -129,6 +129,38 @@ async def _do_merge(
     )
 
 
+async def _do_split(
+    from_slug: str,
+    new_slug: str,
+    record_paths: list[str],
+    new_name: str | None,
+    new_kind: str | None,
+    direct: bool,
+) -> dict[str, Any]:
+    if direct:
+        try:
+            ref = entity_mod.split(
+                from_slug,
+                new_slug,
+                record_paths=record_paths or None,
+                new_name=new_name,
+                new_kind=new_kind,
+            )
+        except (ValueError, entity_mod.EntityError) as e:
+            return {"error": str(e)}
+        return _ref_to_dict(ref)
+    return await call_tool(
+        "memory.entity_split",
+        {
+            "from_slug": from_slug,
+            "new_slug": new_slug,
+            "record_paths": record_paths or None,
+            "new_name": new_name,
+            "new_kind": new_kind,
+        },
+    )
+
+
 # ─── list ──────────────────────────────────────────────────────────────
 
 @app.command("list")
@@ -312,6 +344,42 @@ def merge_cmd(
     console.print(
         f"[green]✓[/green] merged → {data['qualified']} "
         f"[dim](merged_from: {', '.join(merged_from)})[/dim]"
+    )
+
+
+@app.command("split")
+def split_cmd(
+    from_slug: str = typer.Argument(..., help="Source entity (kept; new copy forks off it)."),
+    new_slug: str = typer.Argument(..., help="New slug (must not already exist)."),
+    record: list[str] = typer.Option(
+        [], "--record",
+        help="Record path under brain/ to move to the new entity (repeatable).",
+    ),
+    new_name: str | None = typer.Option(None, "--name"),
+    new_kind: str | None = typer.Option(
+        None, "--kind",
+        help="Kind for the new entity (defaults to source's kind).",
+    ),
+    as_json: bool = typer.Option(False, "--json"),
+    direct: bool = typer.Option(False, "--direct"),
+) -> None:
+    """Fork an active entity into `new_slug`. --record moves specific back-links."""
+    data = _run(
+        _do_split(from_slug, new_slug, list(record), new_name, new_kind, direct)
+    )
+
+    if as_json:
+        typer.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    if "error" in data:
+        console.print(f"[red]✗[/red] {data['error']}")
+        raise typer.Exit(code=4)
+
+    moved = (data.get("meta") or {}).get("forked_from")
+    console.print(
+        f"[green]✓[/green] forked → {data['qualified']} "
+        f"[dim](forked_from {moved}, records moved: {len(record)})[/dim]"
     )
 
 
