@@ -117,3 +117,48 @@ async def test_capture_skips_webhook_when_secret_missing(
     await asyncio.sleep(0)
 
     assert webhook_capture == []
+
+
+# ─── watcher path (supplement_frontmatter fires too) ───────────────────
+
+@pytest.mark.asyncio
+async def test_supplement_fires_webhook_when_rewriting(
+    tmp_brain: Path, webhook_enabled, webhook_capture: list[dict]
+) -> None:
+    """Phase 6.1: external-drop files get the same fire as capture()."""
+    from mcs.adapters.memory import supplement_frontmatter
+
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "2026-05-01-drop.md"
+    # No frontmatter — supplement will rewrite and fire.
+    path.write_text("body only\n", encoding="utf-8")
+
+    rewritten = supplement_frontmatter(path)
+    assert rewritten is True
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert len(webhook_capture) == 1
+    assert webhook_capture[0]["payload"]["capture_id"] == "2026-05-01-drop"
+    assert webhook_capture[0]["payload"]["type"] == "signal"
+
+
+@pytest.mark.asyncio
+async def test_supplement_skips_webhook_when_no_rewrite(
+    tmp_brain: Path, webhook_enabled, webhook_capture: list[dict]
+) -> None:
+    """File already has full frontmatter → capture() already fired; don't double-fire."""
+    from mcs.adapters.memory import supplement_frontmatter
+
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "complete.md"
+    path.write_text(
+        "---\nid: complete\ntype: signal\ndomain: null\nentities: []\n"
+        "created_at: '2026-05-01T00:00:00+09:00'\nsource: typed\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    rewritten = supplement_frontmatter(path)
+    assert rewritten is False
+    await asyncio.sleep(0)
+
+    assert webhook_capture == []

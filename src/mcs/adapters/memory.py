@@ -503,6 +503,19 @@ def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
         rewritten = True
 
     _apply_entity_backlinks(path, meta.get("entities") or [])
+
+    # Watcher-supplement path mirrors capture()'s fire-and-forget webhooks
+    # so externally-dropped files get the same auto-extraction. We only
+    # fire when something was actually rewritten — files whose required
+    # fields were already complete came from capture() (which already
+    # fired) or were edited in body only (no extraction signal change).
+    if rewritten:
+        _schedule_entity_extract_webhook(
+            str(meta.get("id") or path.stem),
+            path,
+            str(meta.get("type") or inferred_type),
+            (meta.get("domain") if meta.get("domain") is not None else None),
+        )
     return rewritten
 
 
@@ -606,7 +619,7 @@ def capture_structured(
         type=str(meta["type"]),
         domain=domain_for_routing,
     )
-    _schedule_entity_extract_webhook(result)
+    _schedule_entity_extract_webhook(result.id, result.path, result.type, result.domain)
     return result
 
 
@@ -679,7 +692,7 @@ def capture(
     _apply_entity_backlinks(path, meta["entities"])
 
     result = CaptureResult(path=path, id=meta["id"], type=meta["type"], domain=domain)
-    _schedule_entity_extract_webhook(result)
+    _schedule_entity_extract_webhook(result.id, result.path, result.type, result.domain)
     return result
 
 
@@ -702,15 +715,21 @@ def _apply_entity_backlinks(record_path: Path, entity_slugs: Iterable[str]) -> N
             continue
 
 
-def _schedule_entity_extract_webhook(result: "CaptureResult") -> None:
+def _schedule_entity_extract_webhook(
+    capture_id: str,
+    capture_path: Path,
+    capture_type: str,
+    domain: str | None,
+) -> None:
     """Schedule a fire-and-forget webhook POST to Hermes entity-extract.
 
     Skipped when:
     - the feature flag is off (default — turn on once a subscription is
       registered upstream),
     - no asyncio loop is running (CLI direct path; the daemon's MCP
-      handler is async, so the webhook fires there).
-    Failures are logged at most — never raised back into the capture call.
+      handler is async, so the webhook fires there; the watcher's main
+      loop is also async).
+    Failures are logged at most — never raised back into the caller.
     """
     settings = load_settings()
     if not settings.entity_extract_webhook_enabled:
@@ -726,10 +745,10 @@ def _schedule_entity_extract_webhook(result: "CaptureResult") -> None:
         return
 
     payload = {
-        "capture_id": result.id,
-        "capture_path": str(result.path),
-        "type": result.type,
-        "domain": result.domain,
+        "capture_id": capture_id,
+        "capture_path": str(capture_path),
+        "type": capture_type,
+        "domain": domain,
     }
     route = settings.entity_extract_webhook_route
 
