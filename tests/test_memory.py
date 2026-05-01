@@ -581,3 +581,37 @@ def test_set_domain_collision_uses_suffix(tmp_brain: Path) -> None:
     out = set_domain("signals/2026-04-22-shared", "career", move=True)
     assert out.path.name == "2026-04-22-shared-2.md"
     assert _read_meta(out.path)["id"] == "2026-04-22-shared-2"
+
+
+# ─── Phase 8.3: id mismatch triggers rewrite + extractor re-fire ────────
+
+def test_supplement_corrects_id_when_filename_changed(tmp_brain: Path) -> None:
+    """Obsidian-rename scenario: id=Untitled but filename differs → rewrite."""
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "2026-05-01-renamed.md"
+    path.write_text(
+        "---\n"
+        "id: Untitled\n"
+        "type: signal\n"
+        "domain: null\n"
+        "entities: []\n"
+        "created_at: '2026-05-01T00:00:00+09:00'\n"
+        "source: file-watcher\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    rewritten = supplement_frontmatter(path)
+    assert rewritten is True
+    assert _read_meta(path)["id"] == "2026-05-01-renamed"
+
+
+def test_supplement_no_rewrite_when_id_matches_stem(tmp_brain: Path) -> None:
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "good.md"
+    path.write_text(
+        "---\nid: good\ntype: signal\ndomain: null\nentities: []\n"
+        "created_at: '2026-05-01T00:00:00+09:00'\nsource: typed\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    assert supplement_frontmatter(path) is False

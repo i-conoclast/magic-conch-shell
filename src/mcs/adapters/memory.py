@@ -582,8 +582,16 @@ def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
     meta = dict(post.metadata or {})
     required = ("id", "type", "domain", "entities", "created_at", "source")
     rewritten = False
-    if not all(k in meta for k in required):
-        meta.setdefault("id", path.stem)
+    needs_rewrite = not all(k in meta for k in required)
+    # FR-A4 robustness: when Obsidian creates "Untitled.md" then the user
+    # renames it, the watcher's first event leaves `id: Untitled` in
+    # frontmatter that no longer matches the new filename. Treat that as
+    # a rewrite signal so extractors fire on the corrected id.
+    if not needs_rewrite and meta.get("id") != path.stem:
+        needs_rewrite = True
+
+    if needs_rewrite:
+        meta["id"] = path.stem  # always derive from the live filename
         meta.setdefault("type", inferred_type)
         # domain may legitimately be None for signals; setdefault is fine.
         if "domain" not in meta:
