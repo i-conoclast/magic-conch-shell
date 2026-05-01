@@ -270,3 +270,67 @@ async def test_skill_create_draft_tool_returns_error_on_invalid_slug(
 
     out = await memory_skill_suggestion_create_draft(name="!!!")  # can't kebab
     assert "error" in out
+
+
+# ─── Phase 13.3: mcs skill new (interactive REPL) ──────────────────────
+
+def test_skill_intake_session_name_uses_timestamp() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from mcs.adapters.hermes_client import skill_intake_session_name
+
+    fake_now = datetime(2026, 5, 1, 19, 0, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+    assert (
+        skill_intake_session_name(now=fake_now)
+        == "skill-intake-20260501-190030"
+    )
+
+
+def test_skill_new_help_lists_subcommand(runner: CliRunner) -> None:
+    result = runner.invoke(app, ["skill", "--help"])
+    assert result.exit_code == 0
+    assert " new " in result.stdout
+
+
+def test_skill_new_quits_on_empty_first_input(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_brain: Path
+) -> None:
+    """Empty user input on first turn should exit cleanly without LLM call."""
+    from mcs.commands import skill as skill_cmd
+
+    called = {"n": 0}
+
+    async def fake_run_skill(**kwargs):
+        called["n"] += 1
+        return {"text": "should not be called"}
+
+    monkeypatch.setattr(skill_cmd, "run_skill", fake_run_skill)
+
+    # Simulate empty stdin
+    result = runner.invoke(app, ["skill", "new"], input="\n")
+    assert result.exit_code == 0
+    assert called["n"] == 0
+
+
+def test_skill_new_runs_one_turn_with_opener(
+    monkeypatch: pytest.MonkeyPatch, runner: CliRunner, tmp_brain: Path
+) -> None:
+    """Opener arg + immediate quit on second turn → exactly one Hermes call."""
+    from mcs.commands import skill as skill_cmd
+
+    seen: list[dict] = []
+
+    async def fake_run_skill(**kwargs):
+        seen.append(kwargs)
+        return {"text": "ack from skill"}
+
+    monkeypatch.setattr(skill_cmd, "run_skill", fake_run_skill)
+
+    result = runner.invoke(
+        app, ["skill", "new", "월요일 OKR 가볍게 점검"], input="quit\n"
+    )
+    assert result.exit_code == 0
+    assert len(seen) == 1
+    assert seen[0]["skill"] == "skill-intake"
+    assert seen[0]["opener"] == "월요일 OKR 가볍게 점검"
+    assert "ack from skill" in result.stdout

@@ -99,6 +99,18 @@ def intake_session_name(now: datetime | None = None) -> str:
     return f"okr-intake-{n.strftime('%Y%m%d-%H%M%S')}"
 
 
+def skill_intake_session_name(now: datetime | None = None) -> str:
+    """Per-invocation session for skill-intake (FR-E5 manual flow).
+
+    Timestamp-based so each `mcs skill new` run starts fresh; the skill
+    persists the draft itself via memory.skill_suggestion_create_draft
+    so re-running mid-flow doesn't risk picking up stale half-built
+    state.
+    """
+    n = now or datetime.now(_KST)
+    return f"skill-intake-{n.strftime('%Y%m%d-%H%M%S')}"
+
+
 def update_session_name(objective_id: str) -> str:
     """Per-Objective name so weekly checkups share the same conversation."""
     return f"okr-update-{objective_id}"

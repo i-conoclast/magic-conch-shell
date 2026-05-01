@@ -25,6 +25,13 @@ from rich.table import Table
 from mcs.adapters import skill_corpus, skill_detector, skill_labeler
 from mcs.adapters import skill_suggestion as ss
 from mcs.adapters.daemon_client import DaemonUnreachable, call_tool
+from mcs.adapters.hermes_client import (
+    HermesAuthError,
+    HermesError,
+    HermesUnreachable,
+    run_skill,
+    skill_intake_session_name,
+)
 
 
 app = typer.Typer(name="skill", help="Skill-promotion drafts (FR-E5).")
@@ -285,3 +292,79 @@ def scan_cmd(
         f"{summary['skipped-existing']} duplicates, "
         f"{summary['error']} errors.[/dim]"
     )
+
+
+# ─── new (interactive intake) ──────────────────────────────────────────
+
+_EXIT_WORDS = frozenset(
+    {"quit", "exit", "q", "그만", "나갈게", "끝", "cancel", "취소", "나중에", "later"}
+)
+
+
+@app.command("new")
+def new_cmd(
+    opener: str | None = typer.Argument(
+        None,
+        help="Optional first message to seed the intake (e.g. a phrase "
+        "describing the pattern). Skill greets and prompts when omitted.",
+    ),
+) -> None:
+    """Drive the Hermes skill-intake skill in a multi-turn REPL.
+
+    Exits cleanly on empty input, Ctrl-C, or an exit word
+    (cancel / 취소 / 나중에 / quit). The skill persists the draft
+    itself via memory.skill_suggestion_create_draft on user confirm —
+    abandoning the REPL mid-flow is safe (no draft saved).
+    """
+    session = skill_intake_session_name()
+    console.print(f"[dim]session:[/dim] [cyan]{session}[/cyan]")
+    console.print(
+        "[dim]empty line or 'quit' to end · the skill saves on confirm.[/dim]\n"
+    )
+
+    user_msg = opener
+    while True:
+        if not user_msg:
+            try:
+                user_msg = typer.prompt("you", default="", show_default=False)
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[dim]ended.[/dim]")
+                return
+
+        if not user_msg.strip() or user_msg.strip().lower() in _EXIT_WORDS:
+            console.print("[dim]ended.[/dim]")
+            return
+
+        try:
+            result = asyncio.run(
+                run_skill(
+                    skill="skill-intake",
+                    opener=user_msg,
+                    conversation=session,
+                    timeout=240.0,
+                )
+            )
+        except HermesUnreachable as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=3) from e
+        except HermesAuthError as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=4) from e
+        except HermesError as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(code=1) from e
+        except KeyboardInterrupt:
+            console.print(
+                "\n[dim]interrupted — partial draft (if any) was already saved by the skill.[/dim]"
+            )
+            return
+
+        reply = (result.get("text") or "").strip()
+        if reply:
+            console.print(f"\n[bold cyan]conch[/bold cyan]\n{reply}\n")
+        else:
+            console.print(
+                "[dim](no visible reply — skill may have ended silently)[/dim]"
+            )
+
+        user_msg = None
