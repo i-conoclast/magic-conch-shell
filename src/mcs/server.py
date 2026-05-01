@@ -33,6 +33,7 @@ from mcs.adapters.memory import (
     upsert_daily_section as core_upsert_daily_section,
 )
 from mcs.adapters import entity as entity_mod
+from mcs.adapters import inbox as inbox_mod
 from mcs.adapters import notion as notion_mod
 from mcs.adapters.notion import (
     CaptureInput,
@@ -861,6 +862,50 @@ async def memory_entity_merge(
     except entity_mod.EntityError as e:
         return {"error": str(e)}
     return _entity_ref_dict(ref)
+
+
+@mcp.tool(
+    name="memory.inbox_list",
+    description=(
+        "List pending suggestions across all inbox sources (entity drafts, "
+        "future skill promotions, etc.). Optional `item_type` filter "
+        "narrows to one source. Newest first. Used by inbox-approve skill "
+        "and `mcs inbox list` CLI."
+    ),
+)
+async def memory_inbox_list(
+    item_type: str | None = None,
+) -> list[dict[str, Any]]:
+    return [it.to_dict() for it in inbox_mod.list_pending(item_type=item_type)]
+
+
+@mcp.tool(
+    name="memory.inbox_act",
+    description=(
+        "Dispatch a verdict on one inbox item: action ∈ "
+        "{approve, reject, defer}. Optional `extra` (dict, type-specific "
+        "for confirm path) or `reason` (str, for reject). Returns the "
+        "owning adapter's result dict or {error}."
+    ),
+)
+async def memory_inbox_act(
+    item_type: str,
+    item_id: str,
+    action: str,
+    extra: dict[str, Any] | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if extra is not None:
+        kwargs["extra"] = extra
+    if reason is not None:
+        kwargs["reason"] = reason
+    try:
+        return inbox_mod.act(item_type, item_id, action, **kwargs)
+    except inbox_mod.InboxError as e:
+        return {"error": str(e)}
+    except entity_mod.EntityError as e:
+        return {"error": str(e)}
 
 
 @mcp.tool(
