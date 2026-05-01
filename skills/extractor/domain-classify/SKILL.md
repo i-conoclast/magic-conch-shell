@@ -58,8 +58,12 @@ metadata:
 1. payload 또는 사용자 인자에서 `capture_id` (혹은 `capture_path`) 받음.
 2. `mcp_mcs_memory_show(query=id)` 호출.
    - `found=False` → 한 줄 에러 후 종료.
-3. 응답에서 `domain` 가 **이미 비어있지 않은 값** 이면:
-   - 한 줄: `skipped (already domain=<X>)` 후 종료. set_domain 호출 X.
+3. 이미 도메인이 박혀 있는 경우 (`domain` 비어있지 않음):
+   - 파일이 `brain/signals/` 에 있으면 (path 가 `signals/...` 로 시작) →
+     **분류는 건너뛰되** `mcp_mcs_memory_set_domain(capture_id, <current_domain>, move=True)`
+     호출해서 path 만 정합화. 한 줄: `relocated (domain=<X>)`.
+   - 파일이 이미 `brain/domains/` 안에 있으면 → 한 줄
+     `skipped (already domain=<X>)` 후 종료, set_domain 호출 X.
 
 ### Phase 2 — 분류
 

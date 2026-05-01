@@ -696,3 +696,23 @@ def test_supplement_backfills_body_hash_on_legacy_file(tmp_brain: Path) -> None:
     # Missing body_hash + complete required → still rewrites (= re-fire).
     assert supplement_frontmatter(path) is True
     assert "body_hash" in _read_meta(path)
+
+
+def test_set_domain_move_relocates_already_classified_signal(tmp_brain: Path) -> None:
+    """User-reported gap: file has domain set but is still in signals/.
+    set_domain(same_domain, move=True) should still relocate it."""
+    from mcs.adapters.memory import set_domain
+    # Simulate the stuck state: signals/ file with domain already set.
+    (tmp_brain / "signals").mkdir(exist_ok=True)
+    sig = tmp_brain / "signals" / "stuck.md"
+    sig.write_text(
+        "---\nid: stuck\ntype: signal\ndomain: career\nentities: []\n"
+        "created_at: '2026-05-01T00:00:00+09:00'\nsource: file-watcher\n"
+        "body_hash: dummy\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    out = set_domain("stuck", "career", move=True)
+    assert out.moved_from == sig
+    assert "domains/career" in str(out.path)
+    assert not sig.exists()

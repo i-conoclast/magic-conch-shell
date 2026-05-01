@@ -347,17 +347,24 @@ def set_domain(
     meta = dict(post.metadata or {})
     current = meta.get("domain")
 
-    if current == domain:
+    if current == domain and not move:
         return SetDomainResult(domain=domain, path=path)  # idempotent
 
-    meta["domain"] = domain
-    path.write_text(
-        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
-        encoding="utf-8",
-    )
+    if current != domain:
+        meta["domain"] = domain
+        path.write_text(
+            frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+            encoding="utf-8",
+        )
 
     moved_from: Path | None = None
-    if move and domain is not None and current is None:
+    # Reconcile path with the domain whenever move=True. This covers two
+    # cases:
+    # (a) fresh classification — domain transitioning None → valid
+    # (b) stuck file — domain already set but file still in signals/
+    #     (e.g. an earlier classify run set the field but the move was
+    #      skipped because the daemon was down)
+    if move and domain is not None:
         settings = load_settings()
         brain = settings.brain_dir.resolve()
         # Only move records currently under brain/signals/.
