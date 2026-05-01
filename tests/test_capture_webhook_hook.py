@@ -13,6 +13,17 @@ from mcs.adapters.memory import capture
 
 # ─── fixtures ──────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin HOME to a tmp dir so config's ~/.hermes/.env fallback finds nothing.
+
+    Without this, the real user's .env (which Phase 2.4 setup populates
+    with MCS_ENTITY_EXTRACT_WEBHOOK_*) bleeds into "secret missing" /
+    "flag off" assertions.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 @pytest.fixture
 def webhook_capture(monkeypatch: pytest.MonkeyPatch):
     """Patch fire_webhook to record calls; returns the recorder list."""

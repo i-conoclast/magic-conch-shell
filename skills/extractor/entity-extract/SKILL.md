@@ -138,3 +138,30 @@ webhook 자동 트리거 케이스에서는 `--deliver none` 으로 등록되므
 - 데이터 모델: `docs/design/fr-notes/FR-C1.md`
 - 스킬 컨벤션: `feedback_extractor_skill_path` (이 디렉토리 위치 자체가 룰)
 - 트리거 메커니즘: Hermes webhook-subscriptions (mcs `feedback_hermes_trigger_via_webhook` 참조)
+
+## 자동 트리거 셋업 (1회)
+
+신규 머신 / `~/.hermes` 초기화 후에는 두 단계 필요:
+
+1. **Hermes 쪽** — webhook 플랫폼 켜고 라우트 등록:
+   ```bash
+   # ~/.hermes/config.yaml 에 platforms.webhook.enabled: true + port: 8644 추가
+   hermes gateway restart
+   SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+   hermes webhook subscribe entity-extract \
+     --skills entity-extract \
+     --prompt "Run /entity-extract for capture id={capture_id} path={capture_path} domain={domain} type={type}" \
+     --description "mcs daemon → FR-C1 entity drafts" \
+     --deliver log \
+     --secret "$SECRET"
+   ```
+
+2. **mcs 쪽** — `~/.hermes/.env` 에 같은 secret 박기 (mcs.config 가 이 파일을 fallback 으로 읽음):
+   ```
+   MCS_ENTITY_EXTRACT_WEBHOOK_ENABLED=true
+   MCS_ENTITY_EXTRACT_WEBHOOK_ROUTE=entity-extract
+   MCS_ENTITY_EXTRACT_WEBHOOK_SECRET=<위에서 만든 SECRET>
+   ```
+   그리고 `mcs daemon stop && mcs daemon start --daemon` 으로 재로딩.
+
+이후로는 `mcs capture "..."` 한 줄이 → webhook → 이 스킬 → drafts/ 까지 자동.

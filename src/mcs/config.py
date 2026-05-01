@@ -78,12 +78,13 @@ class Settings(BaseModel):
             daemon_host=os.environ.get("MCS_DAEMON_HOST", "127.0.0.1"),
             daemon_port=int(os.environ.get("MCS_DAEMON_PORT", "18342")),
             entity_extract_webhook_enabled=_truthy(
-                os.environ.get("MCS_ENTITY_EXTRACT_WEBHOOK_ENABLED")
+                _env_or_hermes_env("MCS_ENTITY_EXTRACT_WEBHOOK_ENABLED")
             ),
-            entity_extract_webhook_route=os.environ.get(
-                "MCS_ENTITY_EXTRACT_WEBHOOK_ROUTE", "entity-extract"
+            entity_extract_webhook_route=(
+                _env_or_hermes_env("MCS_ENTITY_EXTRACT_WEBHOOK_ROUTE")
+                or "entity-extract"
             ),
-            entity_extract_webhook_secret=os.environ.get(
+            entity_extract_webhook_secret=_env_or_hermes_env(
                 "MCS_ENTITY_EXTRACT_WEBHOOK_SECRET"
             ),
         )
