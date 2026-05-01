@@ -52,6 +52,13 @@ class Settings(BaseModel):
     entity_extract_webhook_route: str = Field(default="entity-extract")
     entity_extract_webhook_secret: str | None = None
 
+    # Webhook trigger (FR-A3: capture → Hermes domain-classify).
+    # Same shape as entity-extract — independent flag/secret so the two
+    # extractors can be enabled separately.
+    domain_classify_webhook_enabled: bool = Field(default=False)
+    domain_classify_webhook_route: str = Field(default="domain-classify")
+    domain_classify_webhook_secret: str | None = None
+
     @property
     def daemon_url(self) -> str:
         """HTTP URL the MCP client uses to reach the daemon."""
@@ -86,6 +93,16 @@ class Settings(BaseModel):
             ),
             entity_extract_webhook_secret=_env_or_hermes_env(
                 "MCS_ENTITY_EXTRACT_WEBHOOK_SECRET"
+            ),
+            domain_classify_webhook_enabled=_truthy(
+                _env_or_hermes_env("MCS_DOMAIN_CLASSIFY_WEBHOOK_ENABLED")
+            ),
+            domain_classify_webhook_route=(
+                _env_or_hermes_env("MCS_DOMAIN_CLASSIFY_WEBHOOK_ROUTE")
+                or "domain-classify"
+            ),
+            domain_classify_webhook_secret=_env_or_hermes_env(
+                "MCS_DOMAIN_CLASSIFY_WEBHOOK_SECRET"
             ),
         )
 

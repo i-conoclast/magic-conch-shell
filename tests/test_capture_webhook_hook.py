@@ -162,3 +162,64 @@ async def test_supplement_skips_webhook_when_no_rewrite(
     await asyncio.sleep(0)
 
     assert webhook_capture == []
+
+
+# ─── Phase 7.3: domain-classify webhook fires alongside entity-extract ──
+
+@pytest.fixture
+def both_webhooks_enabled(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MCS_ENTITY_EXTRACT_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("MCS_ENTITY_EXTRACT_WEBHOOK_SECRET", "ee-secret")
+    monkeypatch.setenv("MCS_DOMAIN_CLASSIFY_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("MCS_DOMAIN_CLASSIFY_WEBHOOK_SECRET", "dc-secret")
+
+
+@pytest.mark.asyncio
+async def test_capture_fires_both_webhooks_when_both_enabled(
+    tmp_brain: Path, both_webhooks_enabled, webhook_capture: list[dict]
+) -> None:
+    capture(text="hi", domain="career", title="t1")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    routes = sorted(c["route"] for c in webhook_capture)
+    assert routes == ["domain-classify", "entity-extract"]
+    secrets = {c["route"]: c["secret"] for c in webhook_capture}
+    assert secrets["entity-extract"] == "ee-secret"
+    assert secrets["domain-classify"] == "dc-secret"
+
+
+@pytest.mark.asyncio
+async def test_capture_fires_only_enabled_extractors(
+    tmp_brain: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    webhook_capture: list[dict],
+) -> None:
+    """Only domain-classify on, entity-extract off → exactly one fire."""
+    monkeypatch.setenv("MCS_DOMAIN_CLASSIFY_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("MCS_DOMAIN_CLASSIFY_WEBHOOK_SECRET", "dc-secret")
+    # entity-extract flag intentionally absent
+
+    capture(text="hi", domain="career", title="t1")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert [c["route"] for c in webhook_capture] == ["domain-classify"]
+
+
+@pytest.mark.asyncio
+async def test_supplement_fires_both_webhooks(
+    tmp_brain: Path, both_webhooks_enabled, webhook_capture: list[dict]
+) -> None:
+    """Watcher path also fans out to both extractors."""
+    from mcs.adapters.memory import supplement_frontmatter
+
+    (tmp_brain / "signals").mkdir()
+    path = tmp_brain / "signals" / "drop.md"
+    path.write_text("body only\n", encoding="utf-8")
+    supplement_frontmatter(path)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    routes = sorted(c["route"] for c in webhook_capture)
+    assert routes == ["domain-classify", "entity-extract"]

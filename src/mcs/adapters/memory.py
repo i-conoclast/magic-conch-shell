@@ -540,7 +540,7 @@ def supplement_frontmatter(path: Path, *, source: str = "file-watcher") -> bool:
     # fields were already complete came from capture() (which already
     # fired) or were edited in body only (no extraction signal change).
     if rewritten:
-        _schedule_entity_extract_webhook(
+        _schedule_capture_event_webhooks(
             str(meta.get("id") or path.stem),
             path,
             str(meta.get("type") or inferred_type),
@@ -649,7 +649,7 @@ def capture_structured(
         type=str(meta["type"]),
         domain=domain_for_routing,
     )
-    _schedule_entity_extract_webhook(result.id, result.path, result.type, result.domain)
+    _schedule_capture_event_webhooks(result.id, result.path, result.type, result.domain)
     return result
 
 
@@ -722,7 +722,7 @@ def capture(
     _apply_entity_backlinks(path, meta["entities"])
 
     result = CaptureResult(path=path, id=meta["id"], type=meta["type"], domain=domain)
-    _schedule_entity_extract_webhook(result.id, result.path, result.type, result.domain)
+    _schedule_capture_event_webhooks(result.id, result.path, result.type, result.domain)
     return result
 
 
@@ -745,27 +745,38 @@ def _apply_entity_backlinks(record_path: Path, entity_slugs: Iterable[str]) -> N
             continue
 
 
-def _schedule_entity_extract_webhook(
+def _schedule_capture_event_webhooks(
     capture_id: str,
     capture_path: Path,
     capture_type: str,
     domain: str | None,
 ) -> None:
-    """Schedule a fire-and-forget webhook POST to Hermes entity-extract.
+    """Fan out fire-and-forget webhook POSTs to every enabled extractor.
 
-    Skipped when:
-    - the feature flag is off (default — turn on once a subscription is
-      registered upstream),
-    - no asyncio loop is running (CLI direct path; the daemon's MCP
-      handler is async, so the webhook fires there; the watcher's main
-      loop is also async).
+    Currently entity-extract (FR-C1) and domain-classify (FR-A3). Each
+    fires only when its own enable flag + secret are set. Both share
+    the same payload shape so future extractors can subscribe to a
+    sibling route without changing this dispatch.
+
+    Skipped wholesale when no asyncio loop is running (CLI direct path).
     Failures are logged at most — never raised back into the caller.
     """
     settings = load_settings()
-    if not settings.entity_extract_webhook_enabled:
-        return
-    secret = settings.entity_extract_webhook_secret
-    if not secret:
+
+    routes: list[tuple[str, str, str]] = []  # (label, route, secret)
+    if settings.entity_extract_webhook_enabled and settings.entity_extract_webhook_secret:
+        routes.append((
+            "entity-extract",
+            settings.entity_extract_webhook_route,
+            settings.entity_extract_webhook_secret,
+        ))
+    if settings.domain_classify_webhook_enabled and settings.domain_classify_webhook_secret:
+        routes.append((
+            "domain-classify",
+            settings.domain_classify_webhook_route,
+            settings.domain_classify_webhook_secret,
+        ))
+    if not routes:
         return
 
     try:
@@ -780,15 +791,17 @@ def _schedule_entity_extract_webhook(
         "type": capture_type,
         "domain": domain,
     }
-    route = settings.entity_extract_webhook_route
 
-    async def _fire() -> None:
+    async def _fire(label: str, route: str, secret: str) -> None:
         from mcs.adapters.hermes_client import fire_webhook
         out = await fire_webhook(route, payload, secret=secret)
         if not out["ok"]:
             print(
-                f"[entity-extract webhook] {route} failed: {out['error']}",
+                f"[{label} webhook] {route} failed: {out['error']}",
                 flush=True,
             )
 
-    loop.create_task(_fire())
+    for label, route, secret in routes:
+        loop.create_task(_fire(label, route, secret))
+
+
