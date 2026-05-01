@@ -66,9 +66,9 @@ async def _fetch_list(
 
     if drafts_only:
         return await call_tool("memory.entity_list_drafts", {"kind": kind})
-    # The daemon doesn't expose a unified list yet; emulate it for non-drafts.
-    raise typer.BadParameter(
-        "active listing via the daemon is not exposed yet — use --direct."
+    return await call_tool(
+        "memory.entity_list",
+        {"kind": kind, "include_drafts": include_drafts},
     )
 
 

@@ -12,6 +12,7 @@ from mcs.server import (
     memory_entity_confirm,
     memory_entity_create_draft,
     memory_entity_get,
+    memory_entity_list,
     memory_entity_list_drafts,
     memory_entity_reject,
 )
@@ -47,6 +48,19 @@ async def test_list_drafts_tool_filters_by_kind(tmp_brain: Path) -> None:
 
     only_people = await memory_entity_list_drafts(kind="people")
     assert [r["qualified"] for r in only_people] == ["people/jane-smith"]
+
+
+@pytest.mark.asyncio
+async def test_list_tool_active_default_with_optional_drafts(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+    ent.create_draft(kind="companies", name="Acme")  # still draft
+
+    actives = await memory_entity_list()
+    assert {r["qualified"] for r in actives} == {"people/jane-smith"}
+
+    everything = await memory_entity_list(include_drafts=True)
+    assert {r["qualified"] for r in everything} == {"people/jane-smith", "companies/acme"}
 
 
 @pytest.mark.asyncio

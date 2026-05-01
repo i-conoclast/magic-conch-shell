@@ -756,6 +756,23 @@ async def memory_entity_list_drafts(
 
 
 @mcp.tool(
+    name="memory.entity_list",
+    description=(
+        "List entities. Defaults to active only; pass include_drafts=true "
+        "to mix in pending drafts. Optional `kind` filter."
+    ),
+)
+async def memory_entity_list(
+    kind: str | None = None,
+    include_drafts: bool = False,
+) -> list[dict[str, Any]]:
+    return [
+        _entity_ref_dict(r)
+        for r in entity_mod.list_entities(kind=kind, include_drafts=include_drafts)
+    ]
+
+
+@mcp.tool(
     name="memory.entity_get",
     description=(
         "Read an entity profile by `kind/slug` (or bare slug — active "
