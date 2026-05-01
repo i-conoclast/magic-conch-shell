@@ -329,7 +329,9 @@ def confirm(query: str, *, extra: dict[str, Any] | None = None) -> EntityRef:
     meta = dict(post.metadata or {})
     for k in ("status", "detected_at", "detection_confidence"):
         meta.pop(k, None)
-    meta.setdefault("created_at", now_kst().isoformat())
+    now_iso = now_kst().isoformat()
+    meta.setdefault("created_at", now_iso)
+    meta["updated_at"] = now_iso
     if extra:
         for k, v in extra.items():
             if v is None:
@@ -439,6 +441,20 @@ def _write_auto_section(path: Path, head: str, lines: list[str], tail: str) -> N
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
+def _bump_updated_at(path: Path) -> None:
+    """Set frontmatter `updated_at` = now KST. No-op for malformed YAML."""
+    try:
+        post = frontmatter.load(path)
+    except Exception:
+        return
+    meta = dict(post.metadata or {})
+    meta["updated_at"] = now_kst().isoformat()
+    path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+        encoding="utf-8",
+    )
+
+
 def add_backlink(query: str, record_path: Path | str) -> bool:
     """Insert a back-link entry on an entity profile. Idempotent.
 
@@ -463,6 +479,7 @@ def add_backlink(query: str, record_path: Path | str) -> bool:
     lines.append(new_line)
     lines.sort(key=_extract_date_key, reverse=True)
     _write_auto_section(ref.path, head, lines, tail)
+    _bump_updated_at(ref.path)
     return True
 
 
@@ -485,6 +502,7 @@ def remove_backlink(query: str, record_path: Path | str) -> bool:
     if len(new_lines) == len(lines):
         return False
     _write_auto_section(ref.path, head, new_lines, tail)
+    _bump_updated_at(ref.path)
     return True
 
 

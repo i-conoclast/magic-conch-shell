@@ -122,6 +122,9 @@ def test_confirm_promotes_draft_and_strips_draft_fields(tmp_brain: Path) -> None
     assert meta["role"] == "Recruiter"
     assert meta["company"] == "Anthropic"
     assert "created_at" in meta
+    assert "updated_at" in meta
+    # Fresh confirm: updated_at == created_at on the same call.
+    assert meta["updated_at"] == meta["created_at"]
 
 
 def test_confirm_blocks_when_active_already_exists(tmp_brain: Path) -> None:
@@ -288,6 +291,43 @@ def test_capture_hook_silent_when_entity_missing(tmp_brain: Path) -> None:
     # No raise, capture still produced a valid file.
     assert rec.path.exists()
     assert not (tmp_brain / "entities/people/no-such.md").exists()
+
+
+def test_add_backlink_bumps_updated_at(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ref = ent.confirm("people/jane-smith")
+    after_confirm = frontmatter.load(ref.path).metadata["updated_at"]
+
+    rec = capture(text="x", domain="career", title="x")
+    assert ent.add_backlink("people/jane-smith", rec.path) is True
+
+    after_backlink = frontmatter.load(ref.path).metadata["updated_at"]
+    assert after_backlink > after_confirm
+
+
+def test_remove_backlink_bumps_updated_at(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ref = ent.confirm("people/jane-smith")
+    rec = capture(text="x", domain="career", title="x")
+    ent.add_backlink("people/jane-smith", rec.path)
+    after_add = frontmatter.load(ref.path).metadata["updated_at"]
+
+    assert ent.remove_backlink("people/jane-smith", rec.path) is True
+    after_remove = frontmatter.load(ref.path).metadata["updated_at"]
+    assert after_remove > after_add
+
+
+def test_idempotent_backlink_does_not_bump_updated_at(tmp_brain: Path) -> None:
+    """Re-adding the same line is a no-op and must not advance updated_at."""
+    ent.create_draft(kind="people", name="Jane Smith")
+    ref = ent.confirm("people/jane-smith")
+    rec = capture(text="x", domain="career", title="x")
+    ent.add_backlink("people/jane-smith", rec.path)
+    snapshot = frontmatter.load(ref.path).metadata["updated_at"]
+
+    # Second call returns False (already there) → no rewrite, no bump.
+    assert ent.add_backlink("people/jane-smith", rec.path) is False
+    assert frontmatter.load(ref.path).metadata["updated_at"] == snapshot
 
 
 def test_capture_structured_hook_populates_backlinks(tmp_brain: Path) -> None:
