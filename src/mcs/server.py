@@ -600,20 +600,27 @@ async def memory_add_okr_link(
     description=(
         f"Overwrite the `domain` frontmatter field on a brain/ record. "
         f"`domain` must be one of {sorted(DOMAINS)} or null. Idempotent. "
-        f"Used by the Hermes domain-classify skill to persist its "
-        f"inference. Returns {{domain}} or {{error}}."
+        f"With move=true, a signals/* record whose domain transitions "
+        f"None→valid is renamed to brain/domains/{{domain}}/. Returns "
+        f"{{domain, path, moved_from}} or {{error}}."
     ),
 )
 async def memory_set_domain(
-    capture_id: str, domain: str | None
+    capture_id: str,
+    domain: str | None,
+    move: bool = False,
 ) -> dict[str, Any]:
     try:
-        new_value = core_set_domain(capture_id, domain)
+        result = core_set_domain(capture_id, domain, move=move)
     except (MemoNotFound, MemoAmbiguous) as e:
         return {"error": str(e)}
     except ValueError as e:
         return {"error": str(e)}
-    return {"domain": new_value}
+    return {
+        "domain": result.domain,
+        "path": str(result.path),
+        "moved_from": str(result.moved_from) if result.moved_from else None,
+    }
 
 
 @mcp.tool(

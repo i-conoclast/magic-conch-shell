@@ -89,19 +89,28 @@ elif domain in {"health-mental", "relationships", "finance"} and confidence < 0.
 elif confidence < 0.6:
     skip (log: "→ unset (low confidence)")
 else:
-    mcp_mcs_memory_set_domain(capture_id=<id>, domain=<X>)
+    # `move=true` 면 brain/signals/* 파일은 brain/domains/<X>/ 로 자동 이동.
+    # 이미 brain/domains/* 에 있는 파일은 frontmatter 만 업데이트, 이동 X.
+    mcp_mcs_memory_set_domain(capture_id=<id>, domain=<X>, move=True)
 ```
 
-`set_domain` 응답에 `error` 키 있으면 한 줄 보고 후 종료.
+`set_domain` 응답에 `error` 키 있으면 한 줄 보고 후 종료. 응답의 `moved_from` 이 채워져 있으면 종료 출력에 새 경로도 함께 표시.
 
 ### Phase 4 — 종료 출력
 
 ```
 domain-classify · capture=<id>
 ✓ career (0.92) — 면접 후기 + 회사명
+  moved: signals/<id>.md → domains/career/<id>.md
 ```
 
-또는 skip 된 경우 한 줄. webhook 자동 트리거에서는 log 로만 보임.
+이동 안 한 경우 (이미 도메인 폴더에 있거나 skip):
+```
+domain-classify · capture=<id>
+→ unset (low confidence)
+```
+
+webhook 자동 트리거에서는 log 로만 보임.
 
 ## 규칙
 

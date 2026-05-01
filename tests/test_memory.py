@@ -496,14 +496,16 @@ def test_set_domain_overwrites_field(tmp_brain: Path) -> None:
     assert _read_meta(rec.path)["domain"] is None
 
     out = set_domain(rec.id, "career")
-    assert out == "career"
+    assert out.domain == "career"
+    assert out.moved_from is None  # default move=False
     assert _read_meta(rec.path)["domain"] == "career"
 
 
 def test_set_domain_clears_with_none(tmp_brain: Path) -> None:
     from mcs.adapters.memory import set_domain
     rec = capture(text="hi", domain="career", title="t1")
-    set_domain(rec.id, None)
+    out = set_domain(rec.id, None)
+    assert out.domain is None
     assert _read_meta(rec.path)["domain"] is None
 
 
@@ -522,3 +524,60 @@ def test_set_domain_is_idempotent(tmp_brain: Path) -> None:
     set_domain(rec.id, "career")
     mtime_after = rec.path.stat().st_mtime_ns
     assert mtime_before == mtime_after
+
+
+# ─── set_domain move=True (Phase 8.1) ──────────────────────────────────
+
+def test_set_domain_moves_signal_to_domains_when_move_true(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import set_domain
+    rec = capture(text="career memo", title="t1")  # signal
+    assert rec.path.is_relative_to(tmp_brain / "signals")
+
+    out = set_domain(rec.id, "career", move=True)
+    assert out.domain == "career"
+    assert out.moved_from == rec.path
+    assert out.path.is_relative_to(tmp_brain / "domains" / "career")
+    assert not rec.path.exists()
+    assert _read_meta(out.path)["domain"] == "career"
+
+
+def test_set_domain_no_move_for_cross_domain(tmp_brain: Path) -> None:
+    """X→Y is too risky for v0; tag changes, file stays put."""
+    from mcs.adapters.memory import set_domain
+    rec = capture(text="hi", domain="career", title="t1")
+    out = set_domain(rec.id, "ml", move=True)
+    assert out.moved_from is None
+    assert out.path == rec.path
+    assert _read_meta(out.path)["domain"] == "ml"
+
+
+def test_set_domain_no_move_when_clearing(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import set_domain
+    rec = capture(text="hi", domain="career", title="t1")
+    out = set_domain(rec.id, None, move=True)
+    assert out.moved_from is None
+
+
+def test_set_domain_collision_uses_suffix(tmp_brain: Path) -> None:
+    """If the destination filename is taken, the move uses a -2 suffix."""
+    from mcs.adapters.memory import set_domain
+    (tmp_brain / "domains" / "career").mkdir(parents=True)
+    (tmp_brain / "domains" / "career" / "2026-04-22-shared.md").write_text(
+        "---\nid: 2026-04-22-shared\ndomain: career\ntype: note\n"
+        "entities: []\ncreated_at: '2026-04-22T00:00:00+09:00'\n"
+        "source: typed\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    (tmp_brain / "signals").mkdir(exist_ok=True)
+    sig = tmp_brain / "signals" / "2026-04-22-shared.md"
+    sig.write_text(
+        "---\nid: 2026-04-22-shared\ndomain: null\ntype: signal\n"
+        "entities: []\ncreated_at: '2026-04-22T00:00:00+09:00'\n"
+        "source: typed\n---\n\nsignal body\n",
+        encoding="utf-8",
+    )
+
+    # Disambiguate by full path since the stem matches both files.
+    out = set_domain("signals/2026-04-22-shared", "career", move=True)
+    assert out.path.name == "2026-04-22-shared-2.md"
+    assert _read_meta(out.path)["id"] == "2026-04-22-shared-2"

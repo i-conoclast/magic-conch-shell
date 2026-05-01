@@ -294,17 +294,33 @@ def list_captures_by_date(
     return out
 
 
-def set_domain(capture_id: str, domain: str | None) -> str | None:
+@dataclass
+class SetDomainResult:
+    """Outcome of set_domain — caller can tell whether the file was moved."""
+
+    domain: str | None
+    path: Path
+    moved_from: Path | None = None  # set when the file was renamed
+
+
+def set_domain(
+    capture_id: str,
+    domain: str | None,
+    *,
+    move: bool = False,
+) -> SetDomainResult:
     """Overwrite the `domain` frontmatter field on an existing brain/ record.
 
     Validates against the canonical DOMAINS set (None clears the field).
-    Returns the new domain. No filesystem move (a record's path stays
-    where it is — domain is purely a tag).
 
-    This is the write path the Hermes domain-classify skill (FR-A3 / FR-C
-    domain layer) uses to persist its inference. Because it bypasses
-    `capture()`, no entity-extract webhook re-fires from this call —
-    the skill's only side effect is the frontmatter mutation.
+    When `move=True` AND the record currently lives under brain/signals/
+    AND `domain` is a non-null valid domain, the file is renamed to
+    brain/domains/{domain}/{slug}.md (with a `-2`-style suffix on
+    collision). Cross-domain moves (X→Y) and clears (X→None) leave the
+    file alone — too many edge cases for v0.
+
+    Returns a SetDomainResult so callers can pick up the new path and
+    notify back-link consumers (entity profiles) when a move happened.
     """
     if domain is not None and domain not in DOMAINS:
         raise ValueError(
@@ -314,14 +330,53 @@ def set_domain(capture_id: str, domain: str | None) -> str | None:
     path = resolve_memo(capture_id)
     post = frontmatter.load(path)
     meta = dict(post.metadata or {})
-    if meta.get("domain") == domain:
-        return domain  # idempotent
+    current = meta.get("domain")
+
+    if current == domain:
+        return SetDomainResult(domain=domain, path=path)  # idempotent
+
     meta["domain"] = domain
     path.write_text(
         frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
         encoding="utf-8",
     )
-    return domain
+
+    moved_from: Path | None = None
+    if move and domain is not None and current is None:
+        settings = load_settings()
+        brain = settings.brain_dir.resolve()
+        # Only move records currently under brain/signals/.
+        try:
+            rel = path.resolve().relative_to(brain)
+        except ValueError:
+            return SetDomainResult(domain=domain, path=path)
+
+        if rel.parts and rel.parts[0] == "signals":
+            target_dir = brain / "domains" / domain
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            target = target_dir / path.name
+            counter = 2
+            base = target.with_suffix("")
+            while target.exists() and target.resolve() != path.resolve():
+                target = base.with_name(f"{base.name}-{counter}").with_suffix(".md")
+                counter += 1
+
+            if target.resolve() != path.resolve():
+                # Slug suffix changed → keep frontmatter id in sync.
+                if target.stem != path.stem:
+                    meta["id"] = target.stem
+                    path.write_text(
+                        frontmatter.dumps(
+                            frontmatter.Post(post.content or "", **meta)
+                        ) + "\n",
+                        encoding="utf-8",
+                    )
+                moved_from = path
+                path.rename(target)
+                path = target
+
+    return SetDomainResult(domain=domain, path=path, moved_from=moved_from)
 
 
 def add_okr_link(capture_id: str, kr_ids: Iterable[str]) -> list[str]:

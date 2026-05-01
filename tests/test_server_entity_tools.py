@@ -134,7 +134,21 @@ async def test_set_domain_tool_writes_field(tmp_brain: Path) -> None:
 
     rec = capture(text="hi", title="t1")
     out = await memory_set_domain(rec.id, "career")
-    assert out == {"domain": "career"}
+    assert out["domain"] == "career"
+    assert out["moved_from"] is None
+    assert out["path"] == str(rec.path)
+
+
+@pytest.mark.asyncio
+async def test_set_domain_tool_with_move_renames_signal(tmp_brain: Path) -> None:
+    from mcs.adapters.memory import capture
+    from mcs.server import memory_set_domain
+
+    rec = capture(text="hi", title="t1")
+    out = await memory_set_domain(rec.id, "career", move=True)
+    assert out["domain"] == "career"
+    assert out["moved_from"] == str(rec.path)
+    assert "domains/career" in out["path"]
 
 
 @pytest.mark.asyncio
