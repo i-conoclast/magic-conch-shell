@@ -31,6 +31,7 @@ from mcs.adapters.memory import (
     load_memo,
     upsert_daily_section as core_upsert_daily_section,
 )
+from mcs.adapters import entity as entity_mod
 from mcs.adapters import notion as notion_mod
 from mcs.adapters.notion import (
     CaptureInput,
@@ -655,6 +656,146 @@ async def notion_update_daily_task_status(
     except (NotionError, NotionConfigError) as e:
         return {"error": str(e)}
     return {"page_id": pid, "status": status}
+
+
+# ─── Entity tools ──────────────────────────────────────────────────────
+
+def _entity_ref_dict(ref: entity_mod.EntityRef) -> dict[str, Any]:
+    return {
+        "kind": ref.kind,
+        "slug": ref.slug,
+        "qualified": ref.qualified,
+        "name": ref.name,
+        "status": ref.status,
+        "path": str(ref.path),
+        "meta": ref.meta,
+    }
+
+
+@mcp.tool(
+    name="memory.entity_create_draft",
+    description=(
+        "Create a draft entity profile under brain/entities/drafts/. "
+        "Idempotent — if an active or draft profile already exists at "
+        "(kind, slug), the existing record is returned untouched. "
+        "Used by the Hermes entity-extract skill (FR-C1)."
+    ),
+)
+async def memory_entity_create_draft(
+    kind: str,
+    name: str,
+    slug: str | None = None,
+    detected_at: str | None = None,
+    detection_confidence: float | None = None,
+    promoted_from: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        ref = entity_mod.create_draft(
+            kind=kind,
+            name=name,
+            slug=slug,
+            detected_at=detected_at,
+            detection_confidence=detection_confidence,
+            promoted_from=promoted_from,
+            extra=extra,
+        )
+    except (ValueError, entity_mod.EntityError) as e:
+        return {"error": str(e)}
+    return _entity_ref_dict(ref)
+
+
+@mcp.tool(
+    name="memory.entity_confirm",
+    description=(
+        "Promote a draft entity to active. Strips draft-only fields and "
+        "merges optional `extra` fields (role, company, …). Returns the "
+        "promoted ref or {error}. Used by evening-retro's approval inbox."
+    ),
+)
+async def memory_entity_confirm(
+    slug: str, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    try:
+        ref = entity_mod.confirm(slug, extra=extra)
+    except entity_mod.EntityError as e:
+        return {"error": str(e)}
+    return _entity_ref_dict(ref)
+
+
+@mcp.tool(
+    name="memory.entity_reject",
+    description=(
+        "Delete a draft entity and append a JSONL record to "
+        ".brain/rejected-entities.jsonl. Returns the rejection record "
+        "or {error}. Active entities are refused — use a delete command."
+    ),
+)
+async def memory_entity_reject(
+    slug: str, reason: str | None = None
+) -> dict[str, Any]:
+    try:
+        record = entity_mod.reject(slug, reason=reason)
+    except entity_mod.EntityError as e:
+        return {"error": str(e)}
+    return record
+
+
+@mcp.tool(
+    name="memory.entity_list_drafts",
+    description=(
+        "List pending entity drafts. Optional `kind` filter "
+        "(people | companies | jobs | books). Used by evening-retro to "
+        "render the approval inbox."
+    ),
+)
+async def memory_entity_list_drafts(
+    kind: str | None = None,
+) -> list[dict[str, Any]]:
+    return [_entity_ref_dict(r) for r in entity_mod.list_drafts(kind=kind)]
+
+
+@mcp.tool(
+    name="memory.entity_get",
+    description=(
+        "Read an entity profile by `kind/slug` (or bare slug — active "
+        "preferred over draft). Returns ref fields + body, or "
+        "{found: False, reason, candidates?} when missing/ambiguous."
+    ),
+)
+async def memory_entity_get(slug: str) -> dict[str, Any]:
+    try:
+        ref = entity_mod.resolve_entity(slug)
+    except entity_mod.EntityNotFound as e:
+        return {"found": False, "reason": str(e), "candidates": []}
+    except entity_mod.EntityAmbiguous as e:
+        return {
+            "found": False,
+            "reason": str(e),
+            "candidates": list(e.candidates),
+        }
+    body = ref.path.read_text(encoding="utf-8")
+    return {
+        "found": True,
+        **_entity_ref_dict(ref),
+        "body": body,
+    }
+
+
+@mcp.tool(
+    name="memory.entity_add_backlink",
+    description=(
+        "Insert a back-link line for `record_path` on the given entity's "
+        "AUTO-section. Idempotent. Returns {added: bool}. Silent no-op "
+        "(added=False) when the entity profile doesn't exist yet — "
+        "callers that care should check entity_get first."
+    ),
+)
+async def memory_entity_add_backlink(
+    slug: str, record_path: str
+) -> dict[str, Any]:
+    added = entity_mod.add_backlink(slug, Path(record_path))
+    return {"added": added}
 
 
 @mcp.tool(
