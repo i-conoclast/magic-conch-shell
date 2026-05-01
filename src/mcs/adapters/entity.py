@@ -748,6 +748,50 @@ def split(
     return _load_ref(new_path, kind=target_kind, slug=new_slug, draft=False)
 
 
+def rename_record_in_backlinks(
+    old_rel: str,
+    new_rel: str,
+    entity_slugs: Iterable[str],
+) -> int:
+    """Rewrite AUTO-section lines pointing at `old_rel` → `new_rel`.
+
+    `old_rel` / `new_rel` are brain-relative, no `.md` (the same form
+    `_record_descriptor` produces). Only the entities in `entity_slugs`
+    are visited — we trust callers to pass the moved record's frontmatter
+    `entities` list, which is the full set of profiles that could
+    reference it.
+
+    Returns the count of entities actually rewritten. Used by
+    `memory.set_domain(move=True)` after a signals→domains rename.
+    """
+    if old_rel == new_rel or not entity_slugs:
+        return 0
+
+    rewrote = 0
+    for slug in entity_slugs:
+        try:
+            ref = resolve_entity(slug)
+        except EntityError:
+            continue
+        head, lines, tail = _read_auto_section(ref.path)
+        new_lines: list[str] = []
+        changed = False
+        for ln in lines:
+            m = _BACKLINK_RE.match(ln)
+            if m and m.group("rel") == old_rel:
+                new_lines.append(
+                    f"- [[{new_rel}]] ({m.group('date')}, {m.group('type')})"
+                )
+                changed = True
+            else:
+                new_lines.append(ln)
+        if changed:
+            _write_auto_section(ref.path, head, new_lines, tail)
+            _bump_updated_at(ref.path)
+            rewrote += 1
+    return rewrote
+
+
 def rebuild_backlinks() -> int:
     """Clear every entity's AUTO section and re-derive from brain/ records.
 
@@ -797,6 +841,7 @@ __all__ = [
     "rebuild_backlinks",
     "reject",
     "remove_backlink",
+    "rename_record_in_backlinks",
     "resolve_entity",
     "split",
 ]

@@ -496,3 +496,53 @@ def test_split_refuses_draft_source(tmp_brain: Path) -> None:
     ent.create_draft(kind="people", name="Kim")  # still draft
     with pytest.raises(ent.EntityError, match="draft"):
         ent.split("people/kim", "kim-2")
+
+
+# ─── rename_record_in_backlinks (Phase 8.2) ────────────────────────────
+
+def test_rename_record_updates_only_referenced_entities(tmp_brain: Path) -> None:
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+    ent.create_draft(kind="people", name="John Doe")
+    ent.confirm("people/john-doe")
+
+    a = capture(text="a", domain="career", entities=["people/jane-smith"], title="a")
+
+    n = ent.rename_record_in_backlinks(
+        f"domains/career/{a.path.stem}",
+        f"domains/ml/{a.path.stem}",
+        ["people/jane-smith", "people/john-doe"],
+    )
+    assert n == 1  # only Jane has a back-link to rewrite
+
+    jane = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    assert "domains/ml/" in jane
+    assert "domains/career/" not in jane
+
+    # John was untouched.
+    john = (tmp_brain / "entities/people/john-doe.md").read_text(encoding="utf-8")
+    assert "domains/ml/" not in john
+
+
+def test_rename_record_no_op_when_old_equals_new(tmp_brain: Path) -> None:
+    assert ent.rename_record_in_backlinks("a", "a", ["people/x"]) == 0
+
+
+def test_set_domain_move_rewrites_backlinks(tmp_brain: Path) -> None:
+    """End-to-end: signal with entity → set_domain(move=True) → backlink updated."""
+    from mcs.adapters.memory import set_domain
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    rec = capture(text="career hi", entities=["people/jane-smith"], title="career-hi")
+    # Capture goes to signals/ since no domain provided.
+    assert "signals/" in str(rec.path)
+
+    out = set_domain(rec.id, "career", move=True)
+    assert out.moved_from is not None
+    assert "domains/career/" in str(out.path)
+
+    # Entity profile back-link line was rewritten to the new path.
+    jane = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    assert f"domains/career/{out.path.stem}" in jane
+    assert f"signals/{rec.path.stem}" not in jane

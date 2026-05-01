@@ -373,8 +373,19 @@ def set_domain(
                         encoding="utf-8",
                     )
                 moved_from = path
+                old_rel = moved_from.relative_to(brain).with_suffix("").as_posix()
                 path.rename(target)
                 path = target
+                new_rel = path.relative_to(brain).with_suffix("").as_posix()
+
+                # Rewrite back-links on every entity this record references
+                # so AUTO-section lines stay live across the move.
+                entities = list(meta.get("entities") or [])
+                if entities:
+                    from mcs.adapters import entity as entity_mod
+                    entity_mod.rename_record_in_backlinks(
+                        old_rel, new_rel, entities
+                    )
 
     return SetDomainResult(domain=domain, path=path, moved_from=moved_from)
 
