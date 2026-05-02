@@ -7,13 +7,53 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 
+def _find_brain_root(start: Path) -> Path | None:
+    """Walk up from `start` looking for a magic-conch-shell brain root.
+
+    Marker: a `pyproject.toml` whose project name is `magic-conch-shell`.
+    Bounded by the filesystem root; returns None if no marker matches.
+    """
+    for d in [start, *start.parents]:
+        py = d / "pyproject.toml"
+        if not py.is_file():
+            continue
+        try:
+            txt = py.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if 'name = "magic-conch-shell"' in txt:
+            return d
+    return None
+
+
+def _resolve_brain_root() -> Path:
+    """Where the user's brain/ + .brain/ live — independent of CWD.
+
+    Order: `MCS_REPO_ROOT` env var → walk-up from CWD for the marker →
+    CWD fallback. The CWD fallback preserves the contract the `tmp_brain`
+    test fixture relies on (no marker in tmp_path → resolve under tmp_path).
+    """
+    env = os.environ.get("MCS_REPO_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    found = _find_brain_root(Path.cwd().resolve())
+    if found:
+        return found
+    return Path.cwd().resolve()
+
+
 class Settings(BaseModel):
     """Runtime settings for magic-conch-shell."""
 
-    # Paths
+    # Package install location — anchors bundled assets (templates/,
+    # skills/, archive/). For editable installs this happens to coincide
+    # with the brain root; for a future non-editable install they diverge.
     repo_root: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[2])
-    brain_dir: Path = Field(default_factory=lambda: Path("brain").resolve())
-    cache_dir: Path = Field(default_factory=lambda: Path(".brain").resolve())
+    # User's brain/ + .brain/ root — discovered via env / walk-up so that
+    # `mcs daemon status` works from any CWD (was the bug: `Path(".brain")
+    # .resolve()` is CWD-relative, so daemon.pid was not found from $HOME).
+    brain_dir: Path = Field(default_factory=lambda: _resolve_brain_root() / "brain")
+    cache_dir: Path = Field(default_factory=lambda: _resolve_brain_root() / ".brain")
 
     # LLM
     ollama_base_url: str = Field(default="http://localhost:11434/v1")
@@ -67,7 +107,10 @@ class Settings(BaseModel):
     @classmethod
     def load(cls) -> "Settings":
         """Load settings from env vars, falling back to defaults."""
+        brain_root = _resolve_brain_root()
         return cls(
+            brain_dir=brain_root / "brain",
+            cache_dir=brain_root / ".brain",
             ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
             ollama_default_model=os.environ.get(
                 "OLLAMA_DEFAULT_MODEL", "qwen3.6:35b-a3b-mxfp8"
