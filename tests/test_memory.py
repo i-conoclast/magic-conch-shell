@@ -17,6 +17,7 @@ from mcs.adapters.memory import (
     load_memo,
     resolve_memo,
     supplement_frontmatter,
+    read_daily,
     upsert_daily_section,
 )
 
@@ -451,6 +452,28 @@ def test_upsert_daily_section_preserves_other_sections(tmp_brain: Path) -> None:
     assert "morning v2" in body
     assert "evening v1" in body   # evening section intact
     assert "morning v1" not in body
+
+
+def test_read_daily_returns_full_markdown(tmp_brain: Path) -> None:
+    upsert_daily_section("2026-04-23", "Morning Brief", "오늘 우선순위 3")
+    result = read_daily("2026-04-23")
+    assert result["exists"] is True
+    assert "## Morning Brief" in result["content"]
+    assert "오늘 우선순위 3" in result["content"]
+    assert result["content"].startswith("---")  # frontmatter included
+    assert result["path"] == str(daily_file_path("2026-04-23"))
+
+
+def test_read_daily_missing_file_returns_empty(tmp_brain: Path) -> None:
+    result = read_daily("2026-04-22")
+    assert result["exists"] is False
+    assert result["content"] == ""
+    assert result["path"] == str(daily_file_path("2026-04-22"))
+
+
+def test_read_daily_invalid_date_raises(tmp_brain: Path) -> None:
+    with pytest.raises(ValueError):
+        read_daily("2026/04/23")
 
 
 # ─── FR-C4.2: watcher entity backlink hook ─────────────────────────────

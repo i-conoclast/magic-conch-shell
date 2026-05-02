@@ -29,6 +29,7 @@ from mcs.adapters.memory import (
     daily_file_path as core_daily_file_path,
     list_captures_by_date as core_list_captures_by_date,
     load_memo,
+    read_daily as core_read_daily,
     set_domain as core_set_domain,
     upsert_daily_section as core_upsert_daily_section,
 )
@@ -540,6 +541,36 @@ async def memory_upsert_daily_section(
     except ValueError:
         rel = str(path)
     return {"path": str(path), "rel_path": rel, "heading": heading, "date": date}
+
+
+@mcp.tool(
+    name="memory.read_daily",
+    description=(
+        "Read the raw markdown of brain/daily/YYYY/MM/DD.md. "
+        "Returns {path, exists, content}; content is empty when the file "
+        "is missing. Used by morning-brief / daily-plan / evening-retro "
+        "to load recent days' context or inspect a specific date on "
+        "request."
+    ),
+)
+async def memory_read_daily(date: str) -> dict[str, Any]:
+    try:
+        result = core_read_daily(date)
+    except ValueError as e:
+        return {"error": str(e)}
+    settings = load_settings()
+    path = Path(result["path"])
+    try:
+        rel = str(path.relative_to(settings.repo_root.resolve()))
+    except ValueError:
+        rel = str(path)
+    return {
+        "path": result["path"],
+        "rel_path": rel,
+        "exists": result["exists"],
+        "content": result["content"],
+        "date": date,
+    }
 
 
 @mcp.tool(

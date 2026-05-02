@@ -496,6 +496,23 @@ def _daily_frontmatter(date: str) -> dict[str, Any]:
     }
 
 
+def read_daily(date: str) -> dict[str, Any]:
+    """Read the raw markdown of brain/daily/YYYY/MM/DD.md.
+
+    Returns a dict with `path`, `exists`, and `content` (full file
+    text including frontmatter, or empty string if the file does not
+    exist).
+    """
+    path = daily_file_path(date)
+    if not path.exists():
+        return {"path": str(path), "exists": False, "content": ""}
+    return {
+        "path": str(path),
+        "exists": True,
+        "content": path.read_text(encoding="utf-8"),
+    }
+
+
 def upsert_daily_section(date: str, heading: str, content: str) -> Path:
     """Replace (or append) a `## heading` section in the daily file.
 

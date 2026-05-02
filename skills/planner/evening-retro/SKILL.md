@@ -12,6 +12,7 @@ metadata:
     tags: [planner, retro]
     requires_tools:
       - mcp_mcs_memory_list_captures
+      - mcp_mcs_memory_read_daily
       - mcp_mcs_okr_list_active
       - mcp_mcs_memory_upsert_daily_section
       - mcp_mcs_memory_daily_file_path
@@ -39,6 +40,11 @@ metadata:
    - 파일 안 보이면: "오늘 brief / plan 이 없네 — `/morning-brief` 부터 돌려?" 후 종료.
 3. `mcp_mcs_memory_list_captures(date)` — 오늘 캡처 (signal + note).
 4. `mcp_mcs_okr_list_active()` — 활성 OKR + KR 현재 상태.
+5. **최근 3일 daily raw 로드** — `mcp_mcs_memory_read_daily` 를 어제 / 그저께 / 그그저께
+   각각 호출. `exists=false` 결과 무시. raw markdown 그대로 컨텍스트 보유 (오늘 retro 의
+   비교/추세 근거).
+6. **오늘 daily raw 로드** — `mcp_mcs_memory_read_daily(date)` — 오늘의 brief / plan / 📝 Notes
+   섹션을 retro 작성에 사용.
 
 ### Phase 2 — 비교·요약 (Turn 1)
 
@@ -87,6 +93,22 @@ saved → brain/daily/YYYY/MM/DD.md
 
 **Hermes 가 이 마크다운을 그대로 output_text 로 반환** — CLI 가 rich render 함.
 
+### Phase 5 — 후속 트리거 (단발 응답이지만 후속 발화 처리)
+
+사용자가 retro 를 보고 추가 발화하면:
+
+**조회**: `X일 봐줘` / `어제 plan` 류 → `mcp_mcs_memory_read_daily(date=YYYY-MM-DD)` 후 핵심 요약.
+
+**명시 메모리** (자동 추론·자동 저장 금지 — 키워드만):
+- 일반 규칙 (`기억해둬` / `다음부턴` / `앞으로` / `잊지 마` / `default 로`):
+  → Hermes 스킬 메모리에 한 줄 추가. 런타임이 처리 (스킬은 의도만 명확히).
+  → `✓ 기억함: <요약>`.
+- 그날 한정 (`오늘은` / `이번 주는` / `내일까지` / `이번에만`):
+  → `mcp_mcs_memory_read_daily(date)` 로 현재 `## 📝 Notes` 본문 확인 후 새 메모를 `- ` bullet append
+    → `mcp_mcs_memory_upsert_daily_section(date, heading="📝 Notes", content=<누적 본문>)`.
+  → `✓ 오늘 노트 기록`.
+- 판별 애매 → "이거 오늘만? or 앞으로 쭉?" 1줄 되묻기.
+
 ## 규칙
 
 - **민감 도메인 보호**: finance/health-*/relationships 캡처 또는 KR 포함 시 한 줄 고지
@@ -101,8 +123,9 @@ saved → brain/daily/YYYY/MM/DD.md
 |---|---|
 | `mcp_mcs_memory_daily_file_path` | Phase 1 daily 파일 존재 확인 |
 | `mcp_mcs_memory_list_captures` | Phase 1 오늘 캡처 |
+| `mcp_mcs_memory_read_daily` | Phase 1 최근 3일·오늘 raw / Phase 5 특정 일자 조회·📝 Notes 읽기 |
 | `mcp_mcs_okr_list_active` | Phase 1 KR 현재 상태 |
-| `mcp_mcs_memory_upsert_daily_section` | Phase 3 ## 🌙 섹션 저장 |
+| `mcp_mcs_memory_upsert_daily_section` | Phase 3 ## 🌙 / Phase 5 ## 📝 Notes 섹션 저장 |
 
 ## 종료 조건
 

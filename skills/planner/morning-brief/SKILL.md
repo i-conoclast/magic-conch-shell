@@ -12,6 +12,7 @@ metadata:
     tags: [planner, brief]
     requires_tools:
       - mcp_mcs_memory_list_captures
+      - mcp_mcs_memory_read_daily
       - mcp_mcs_okr_list_active
       - mcp_mcs_memory_upsert_daily_section
       - mcp_mcs_memory_daily_file_path
@@ -43,7 +44,10 @@ metadata:
    - 없으면 "어제 기록 없음" 으로 처리.
 2. `mcp_mcs_okr_list_active(quarter=<현재 분기>)` — 활성 Objective + KR.
    - 현재 분기 자동 추정: 1-3→Q1, 4-6→Q2, 7-9→Q3, 10-12→Q4.
-3. (옵션) 오늘 daily 파일이 이미 있는지 `mcp_mcs_memory_daily_file_path(date)`
+3. **최근 3일 daily raw 로드** — `mcp_mcs_memory_read_daily` 를 어제 / 그저께 / 그그저께
+   각각 호출. `exists=false` 인 날짜 결과 무시. 반환된 raw markdown 은 요약하지 말고
+   그대로 컨텍스트에 보유 (이전 retro·plan·📝 Notes 가 brief 근거가 됨).
+4. (옵션) 오늘 daily 파일이 이미 있는지 `mcp_mcs_memory_daily_file_path(date)`
    확인 — exists 면 Morning Brief 섹션만 덮어씀 (사용자가 재생성 요청한 경우).
 
 ### Phase 3 — 브리핑 작성
@@ -91,6 +95,22 @@ saved → brain/daily/YYYY/MM/DD.md
 
 이것이 응답. Hermes 가 이 마크다운을 output_text 로 돌려줘 CLI 에서 그대로 렌더.
 
+### Phase 6 — 후속 트리거 (단발 응답이지만 후속 발화 처리)
+
+사용자가 brief 를 보고 추가 발화하면:
+
+**조회**: `X일 봐줘` / `어제 retro` 류 → `mcp_mcs_memory_read_daily(date=YYYY-MM-DD)` 호출 후 핵심 요약 한 줄.
+
+**명시 메모리** (자동 추론·자동 저장 금지 — 키워드만):
+- 일반 규칙 (`기억해둬` / `다음부턴` / `앞으로` / `잊지 마` / `default 로`):
+  → Hermes 스킬 메모리에 한 줄 추가. 런타임이 처리 (스킬은 의도만 명확히).
+  → 한 줄 확인: `✓ 기억함: <요약>`.
+- 그날 한정 (`오늘은` / `이번 주는` / `내일까지` / `이번에만`):
+  → `mcp_mcs_memory_read_daily(date)` 로 현재 `## 📝 Notes` 본문 확인 후 새 메모를 `- ` bullet append
+    → `mcp_mcs_memory_upsert_daily_section(date, heading="📝 Notes", content=<누적 본문>)`.
+  → 한 줄 확인: `✓ 오늘 노트 기록`.
+- 판별 애매 → "이거 오늘만? or 앞으로 쭉?" 1줄 되묻기.
+
 ## 규칙
 
 - **민감 도메인 보호**: 브리핑 맥락에 finance / health-* / relationships 도메인
@@ -107,9 +127,10 @@ saved → brain/daily/YYYY/MM/DD.md
 | 도구 | 용도 |
 |---|---|
 | `mcp_mcs_memory_list_captures` | 어제 캡처 로드 |
+| `mcp_mcs_memory_read_daily` | Phase 2 최근 3일 raw / Phase 6 특정 일자 조회·📝 Notes 읽기 |
 | `mcp_mcs_okr_list_active` | 활성 OKR/KR 진척 |
 | `mcp_mcs_memory_daily_file_path` | 오늘 daily 파일 존재 확인 (선택) |
-| `mcp_mcs_memory_upsert_daily_section` | Morning Brief 섹션 저장 |
+| `mcp_mcs_memory_upsert_daily_section` | Morning Brief / 📝 Notes 섹션 저장 |
 
 ## 하지 말 것
 

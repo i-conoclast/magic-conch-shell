@@ -12,6 +12,7 @@ metadata:
     tags: [planner, brief, plan]
     requires_tools:
       - mcp_mcs_memory_list_captures
+      - mcp_mcs_memory_read_daily
       - mcp_mcs_okr_list_active
       - mcp_mcs_memory_upsert_daily_section
       - mcp_mcs_notion_push_daily_tasks
@@ -38,7 +39,11 @@ metadata:
 1. opener 에 YYYY-MM-DD 있으면 그 날짜. 없으면 **오늘 KST**.
 2. `mcp_mcs_memory_list_captures(date=<어제>)` — 어제 활동 맥락.
 3. `mcp_mcs_okr_list_active(quarter=<현재 분기>)` — 활성 Objective + KR.
-4. KR 하나도 없으면: "활성 KR 없어 — `/okr-intake` 먼저 돌릴래?" 안내 후 종료.
+4. **최근 3일 daily raw 로드** — `mcp_mcs_memory_read_daily` 를 어제 / 그저께 / 그그저께 각각 호출.
+   - `exists=false` 인 날짜는 결과 무시 (에러 아님).
+   - 반환된 `content` 는 frontmatter 포함 raw markdown — 요약하지 말고 그대로 컨텍스트 보유.
+   - 이전 plan / retro / 📝 Notes 섹션이 오늘 제안 근거가 됨.
+5. KR 하나도 없으면: "활성 KR 없어 — `/okr-intake` 먼저 돌릴래?" 안내 후 종료.
 
 ### Phase 2 — 초안 제시 (Turn 1)
 
@@ -86,6 +91,11 @@ metadata:
 - `[new task]` → N+1 번으로 추가
 - `다 좋아` / `ok` / `확정` / `go` / `push` → Phase 4 로 이동
 
+조회 트리거:
+- `X일 plan/retro/daily 봐줘` / `4/28 봐줘` 등 특정 날짜 언급:
+  → `mcp_mcs_memory_read_daily(date=YYYY-MM-DD)` 호출 후 요청한 섹션 또는 핵심 요약 제시.
+  플랜 편집 흐름은 유지 — 조회 후 "수정 or 확정?" 질문 재출력.
+
 수정 후 **전체 플랜 재출력** — 사용자가 현 상태 확인 가능. 매번 "수정 or 확정?" 질문.
 
 **턴 상한**: 10턴 넘어가면 "오늘 너무 고민 — 일단 확정 or 포기?" 로 좁히기.
@@ -109,6 +119,23 @@ metadata:
    ...
    ```
 4. 사용자에게 최종 한 줄: `✓ 5 tasks → Notion daily_tasks. daily 파일 저장됨.`
+
+### Phase 4.5 — 명시 메모리 트리거 (편집 도중 언제든)
+
+사용자가 **명시적**으로 기억 의사를 표현했을 때만 동작. 자동 추론·자동 저장 금지.
+
+**일반 규칙** — 키워드 `기억해둬` / `다음부턴` / `앞으로` / `잊지 마` / `default 로`:
+→ Hermes 스킬 메모리에 한 줄로 추가. 런타임이 처리하므로 스킬은 의도만 명확히 표현하면 됨
+  ("→ remember as a general rule for daily-plan: <rule>" 식으로 출력 + Hermes 메모리 update 흐름 진입).
+→ 메모리 update 후 한 줄 확인: `✓ 기억함: <요약>`. 그 다음 plan 편집으로 복귀.
+
+**그날 한정 메모** — 키워드 `오늘은` / `이번 주는` / `내일까지` / `이번에만`:
+→ 먼저 `mcp_mcs_memory_read_daily(date)` 로 현재 `## 📝 Notes` 섹션 본문 확인 (있으면).
+→ 새 메모를 `- ` bullet 으로 append.
+→ `mcp_mcs_memory_upsert_daily_section(date, heading="📝 Notes", content=<누적된 본문>)`.
+→ 한 줄 확인: `✓ 오늘 노트 기록`. plan 편집으로 복귀.
+
+판별 애매하면 사용자에게 1줄로 되묻기 — "이거 오늘만? or 앞으로 쭉?"
 
 ### Phase 5 — 취소 경로
 
@@ -134,9 +161,10 @@ metadata:
 | 도구 | 용도 |
 |---|---|
 | `mcp_mcs_memory_list_captures` | Phase 1 어제 캡처 로드 |
+| `mcp_mcs_memory_read_daily` | Phase 1 최근 3일 daily raw 로드 / 편집 중 특정 일자 조회 / Phase 4.5 Notes 섹션 읽기 |
 | `mcp_mcs_okr_list_active` | Phase 1 활성 KR 맥락 |
 | `mcp_mcs_notion_push_daily_tasks` | Phase 4 확정 시 Notion 일괄 등록 |
-| `mcp_mcs_memory_upsert_daily_section` | Phase 4 brain/daily 에 '📋 Today's Plan' 섹션 저장 |
+| `mcp_mcs_memory_upsert_daily_section` | Phase 4 '📋 Today's Plan' / Phase 4.5 '📝 Notes' 섹션 저장 |
 
 ## 종료 조건
 
