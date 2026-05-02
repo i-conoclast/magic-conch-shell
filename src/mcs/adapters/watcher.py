@@ -73,6 +73,14 @@ def _is_scoped(brain: Path, path: Path) -> bool:
         return False
     if path.name.startswith("."):
         return False
+    # Editor atomic-save backup pattern (e.g. `2026-05-02~.md` from
+    # Obsidian/Vim/Emacs writing to `<stem>~.md` and then renaming to
+    # `<stem>.md`). Catching the file during its brief existence would
+    # rewrite frontmatter with id="<stem>~" and fire webhooks for a
+    # phantom capture id, leading to "no brain file with id" errors when
+    # the extractor skill tries to load the (already-renamed-away) file.
+    if path.stem.endswith("~"):
+        return False
     try:
         rel = path.resolve().relative_to(brain.resolve())
     except ValueError:

@@ -64,6 +64,17 @@ def test_not_scoped_git_internals(tmp_path: Path) -> None:
     assert _is_scoped(brain, f) is False
 
 
+def test_not_scoped_editor_tilde_backup(tmp_path: Path) -> None:
+    """`<stem>~.md` is an editor atomic-save backup (Obsidian/Vim/Emacs)
+    that exists only briefly between write and rename; processing it
+    races and fires webhooks for a phantom `<stem>~` capture id."""
+    brain = tmp_path / "brain"
+    (brain / "signals").mkdir(parents=True)
+    f = brain / "signals" / "2026-05-02~.md"
+    f.touch()
+    assert _is_scoped(brain, f) is False
+
+
 # ─── debounce ───────────────────────────────────────────────────────────
 
 def test_debounce_blocks_rapid_repeats(tmp_path: Path) -> None:
