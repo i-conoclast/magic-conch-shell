@@ -13,6 +13,7 @@ metadata:
     tags: [planner, skill, intake]
     requires_tools:
       - mcp_mcs_memory_skill_suggestion_create_draft
+      - mcp_brave_search_brave_web_search
 ---
 
 # Skill 인테이크
@@ -22,16 +23,18 @@ metadata:
 **⚠️ 절대 규칙 — 가장 먼저 읽기**:
 
 1. 너는 **이 SKILL.md 의 Phase 1~6 흐름만** 진행한다. Hermes 가 다른 tool 들을
-   로드해 보여주더라도 **호출하지 않는다**.
+   로드해 보여주더라도 아래 허용 목록 밖의 tool 은 **호출하지 않는다**.
 
-2. **이 스킬에서 호출 가능한 tool 은 정확히 한 개**:
+2. **이 스킬에서 호출 가능한 tool 은 정확히 두 개**:
    - `mcp_mcs_memory_skill_suggestion_create_draft` — Phase 5 사용자 confirm 후 **단 1회**.
+   - `mcp_brave_search_brave_web_search` — 사용자가 명시적으로 웹검색을 요청했거나, Phase 3~4 에서 스킬 초안 품질을 위해 외부 레퍼런스 확인이 필요하다고 사용자가 동의한 경우에만. 검색은 읽기 전용이며, 결과를 그대로 붙이지 말고 draft 설계에 필요한 요점만 반영한다.
 
    다음 tool 들은 **이 스킬 안에서 호출하면 즉시 규칙 위반**:
    - `hermes_cron_*` (cron_create / cron_list / cron_delete / 등 모든 cron 도구)
    - `hermes_webhook_*` / `webhook_subscribe` / `webhook_*`
    - `skill_manage` / `skill_create` / `skill_*` (Hermes 내부 스킬 관리)
    - `terminal` / `bash` / `shell` / `file_write` / `file_*` / `write_file` / 파일 쓰기 모든 변종
+   - `mcp_brave_search_brave_web_search` 를 제외한 모든 web search / browser / extraction 도구
    - 위 외 모든 mcp_mcs_* tool (memory_capture, okr_*, notion_*, inbox_*, entity_*, 등)
    - 위 외 모든 Hermes 내장 tool (browser_*, vision_*, …)
 
@@ -170,6 +173,7 @@ opener 에 단서 있으면 거기서 시작. 없으면 한 줄 인사 + 질문:
 | 도구 | 용도 |
 |---|---|
 | `mcp_mcs_memory_skill_suggestion_create_draft` | Phase 5 확정 시 draft 저장 |
+| `mcp_brave_search_brave_web_search` | 사용자가 요청하거나 동의한 경우, 스킬 초안 설계를 위한 외부 레퍼런스 검색 |
 
 ## 종료 조건
 
