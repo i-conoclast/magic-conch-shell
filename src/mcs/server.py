@@ -1294,7 +1294,20 @@ def run_server(
     global _watch_enabled
     _watch_enabled = watch
 
-    mcp.run(transport="http", host=h, port=p)
+    # stateless_http=True: every Hermes webhook delivery (entity-extract /
+    # domain-classify) opens a fresh MCP client; FastMCP's stateful default
+    # races on session GC and surfaces as `Session terminated` errors that
+    # abort the skill before it can call set_domain. Our tools are pure
+    # request/response (no sampling/elicitation/progress/subscriptions), so
+    # stateless removes the failure class with no behavioural cost.
+    # json_response=True drops SSE framing on responses.
+    mcp.run(
+        transport="http",
+        host=h,
+        port=p,
+        stateless_http=True,
+        json_response=True,
+    )
 
 
 if __name__ == "__main__":
