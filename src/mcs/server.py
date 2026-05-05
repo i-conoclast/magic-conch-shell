@@ -34,6 +34,7 @@ from mcs.adapters.memory import (
     upsert_daily_section as core_upsert_daily_section,
 )
 from mcs.adapters import entity as entity_mod
+from mcs.adapters.entity import rebuild_backlinks as core_rebuild_backlinks
 from mcs.adapters import inbox as inbox_mod
 from mcs.adapters import notion as notion_mod
 from mcs.adapters import skill_suggestion as skill_sug_mod
@@ -59,7 +60,11 @@ from mcs.adapters.okr import (
     update_kr as core_okr_update_kr,
     update_objective as core_okr_update_objective,
 )
-from mcs.adapters.search import search as core_search, sync_file
+from mcs.adapters.search import (
+    rebuild_all as core_rebuild_all,
+    search as core_search,
+    sync_file,
+)
 from mcs.adapters.templates import TemplateError, list_templates, load_template
 from mcs.config import load_settings
 
@@ -608,6 +613,34 @@ async def memory_list_captures(
     except ValueError as e:
         return [{"error": str(e)}]
     return [r.to_dict() for r in rows]
+
+
+@mcp.tool(
+    name="memory.reindex",
+    description=(
+        "Rebuild brain/ indexes (FR-I2). "
+        "vectors=True forces a full re-embed of every brain/ file via "
+        "MemSearch.index(force=True). backlinks=True re-derives every "
+        "entity profile's auto Back-links section by scanning brain/ "
+        "frontmatter `entities:` lists. Both default to True so the "
+        "no-arg call gives a clean rebuild after schema upgrades or "
+        "corruption recovery. "
+        "Daemon-only — running this from outside would race the daemon "
+        "for the Milvus Lite single-process lock."
+    ),
+)
+async def memory_reindex(
+    vectors: bool = True,
+    backlinks: bool = True,
+) -> dict[str, Any]:
+    if not vectors and not backlinks:
+        return {"error": "nothing to do — pass vectors=True or backlinks=True."}
+    out: dict[str, Any] = {"vectors": None, "backlinks": None}
+    if vectors:
+        out["vectors"] = await core_rebuild_all()
+    if backlinks:
+        out["backlinks"] = core_rebuild_backlinks()
+    return out
 
 
 @mcp.tool(

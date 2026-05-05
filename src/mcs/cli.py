@@ -13,6 +13,7 @@ from mcs.commands.inbox import app as inbox_app
 from mcs.commands.skill import app as skill_app
 from mcs.commands.log import log_cmd
 from mcs.commands.okr import app as okr_app
+from mcs.commands.reindex import reindex_cmd
 from mcs.commands.retro import retro_cmd
 from mcs.commands.search import search_cmd
 from mcs.commands.show import show_cmd
@@ -48,6 +49,7 @@ app.command(name="day", help="Daily journal view: daily/ file + day's captures (
 app.command(name="log", help="Structured capture via template (interview, meeting, experiment).")(log_cmd)
 app.command(name="brief", help="Generate morning briefing (FR-D1).")(brief_cmd)
 app.command(name="retro", help="Run evening retro + capture-KR sync (FR-D3).")(retro_cmd)
+app.command(name="reindex", help="Rebuild brain/ vectors + entity back-links (FR-I2).")(reindex_cmd)
 app.add_typer(okr_app, name="okr")
 app.add_typer(entity_app, name="entity")
 app.add_typer(inbox_app, name="inbox")
