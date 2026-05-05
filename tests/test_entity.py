@@ -432,6 +432,45 @@ def test_merge_carries_over_missing_fields_only(tmp_brain: Path) -> None:
     assert meta["location"] == "Seoul"
 
 
+def test_merge_appends_from_body_under_section(tmp_brain: Path) -> None:
+    """`from`'s user-written notes are folded into `into`, not dropped."""
+    ent.create_draft(kind="people", name="J Smith")
+    ent.confirm("people/j-smith")
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    from_path = tmp_brain / "entities/people/j-smith.md"
+    post = frontmatter.load(from_path)
+    post.content = (
+        "## Context\nrecruiter at Acme; introduced via Slack\n\n"
+        "## Back-links (auto)\n"
+        "<!-- AUTO-GENERATED BELOW. DO NOT EDIT. -->\n"
+        "<!-- END AUTO-GENERATED -->\n"
+    )
+    from_path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
+
+    ent.merge("people/j-smith", "people/jane-smith")
+
+    body = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    assert "## merged from people/j-smith" in body
+    assert "recruiter at Acme; introduced via Slack" in body
+    # Back-links section is preserved and still last.
+    assert body.index("## merged from") < body.index("## Back-links (auto)")
+
+
+def test_merge_skips_body_append_for_default_scaffold(tmp_brain: Path) -> None:
+    """Empty draft scaffold shouldn't clutter `into`'s body."""
+    ent.create_draft(kind="people", name="J Smith")
+    ent.confirm("people/j-smith")
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    ent.merge("people/j-smith", "people/jane-smith")
+
+    body = (tmp_brain / "entities/people/jane-smith.md").read_text(encoding="utf-8")
+    assert "## merged from" not in body
+
+
 # ─── split (FR-C5) ─────────────────────────────────────────────────────
 
 def test_split_clones_profile_without_records(tmp_brain: Path) -> None:

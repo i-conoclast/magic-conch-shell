@@ -40,6 +40,8 @@ KNOWN_KINDS: frozenset[str] = frozenset({"people", "companies", "jobs", "books"}
 
 _AUTO_START = "<!-- AUTO-GENERATED BELOW. DO NOT EDIT. -->"
 _AUTO_END = "<!-- END AUTO-GENERATED -->"
+_BACKLINKS_HEADING = "## Back-links (auto)"
+_DRAFT_PLACEHOLDER_BODY = "## Context\n_(승인 시 작성)_"
 
 
 # ─── errors ─────────────────────────────────────────────────────────────
@@ -441,6 +443,22 @@ def _write_auto_section(path: Path, head: str, lines: list[str], tail: str) -> N
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
+def _split_profile_body(content: str) -> tuple[str, str]:
+    """Split a profile body into (user_section, backlinks_section).
+
+    `user_section` = everything before the Back-links heading (or the
+    AUTO_START marker as a fallback). `backlinks_section` includes the
+    heading + AUTO block. If neither marker is present, the whole body
+    is treated as user content.
+    """
+    idx = content.find(_BACKLINKS_HEADING)
+    if idx == -1:
+        idx = content.find(_AUTO_START)
+    if idx == -1:
+        return content, ""
+    return content[:idx], content[idx:]
+
+
 def _bump_updated_at(path: Path) -> None:
     """Set frontmatter `updated_at` = now KST. No-op for malformed YAML."""
     try:
@@ -544,6 +562,9 @@ def merge(from_query: str, into_query: str) -> EntityRef:
       first — merging a draft would silently promote it).
     - Cross-kind merges are refused (people↔companies, etc.).
     - `into` wins on frontmatter collisions; `merged_from` is appended.
+    - `from`'s body (everything above the Back-links section) is
+      appended to `into` under a `## merged from <from.qualified>`
+      heading, unless it's just the empty draft scaffold.
     - All records whose `entities` list contains `from.qualified` get
       rewritten to point at `into.qualified`. Their back-links are
       transferred (added to `into`, removed from `from`).
@@ -616,10 +637,19 @@ def merge(from_query: str, into_query: str) -> EntityRef:
     into_meta["merged_from"] = merged_from
     into_meta["updated_at"] = now_kst().isoformat()
 
+    # Fold `from`'s user-written body into `into` so notes don't vanish.
+    # Skip the empty draft scaffold to avoid clutter.
+    into_user, into_backlinks = _split_profile_body(into_post.content or "")
+    from_user, _ = _split_profile_body(from_post.content or "")
+    from_user_stripped = from_user.strip()
+    if from_user_stripped and from_user_stripped != _DRAFT_PLACEHOLDER_BODY:
+        snippet = f"\n\n## merged from {from_q}\n\n{from_user_stripped}\n\n"
+        new_content = into_user.rstrip() + snippet + into_backlinks
+    else:
+        new_content = into_post.content or ""
+
     into_ref.path.write_text(
-        frontmatter.dumps(
-            frontmatter.Post(into_post.content or "", **into_meta)
-        ) + "\n",
+        frontmatter.dumps(frontmatter.Post(new_content, **into_meta)) + "\n",
         encoding="utf-8",
     )
 
