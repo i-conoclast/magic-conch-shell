@@ -7,6 +7,7 @@ from rich.console import Console
 from mcs.commands.brief import brief_cmd
 from mcs.commands.capture import capture_cmd
 from mcs.commands.daemon import app as daemon_app
+from mcs.commands.day import day_cmd
 from mcs.commands.entity import app as entity_app
 from mcs.commands.inbox import app as inbox_app
 from mcs.commands.skill import app as skill_app
@@ -43,6 +44,7 @@ def hello() -> None:
 app.command(name="capture", help="Capture a one-line memo to brain/.")(capture_cmd)
 app.command(name="search", help="Hybrid search over brain/.")(search_cmd)
 app.command(name="show", help="Read a brain/ memo by id or path.")(show_cmd)
+app.command(name="day", help="Daily journal view: daily/ file + day's captures (FR-B3).")(day_cmd)
 app.command(name="log", help="Structured capture via template (interview, meeting, experiment).")(log_cmd)
 app.command(name="brief", help="Generate morning briefing (FR-D1).")(brief_cmd)
 app.command(name="retro", help="Run evening retro + capture-KR sync (FR-D3).")(retro_cmd)
