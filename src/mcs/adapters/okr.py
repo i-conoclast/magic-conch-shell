@@ -619,7 +619,7 @@ metadata:
   mcs:
     kr_id: {kr_id}
     parent_objective: {parent_id}
-    created_at: {created_at}
+    created_at: "{created_at}"
 ---
 
 # {kr_text}
