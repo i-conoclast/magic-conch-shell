@@ -535,7 +535,7 @@ def push_cmd(
             console.print(f"[red]✗[/red] {e}")
             raise typer.Exit(code=4)
 
-        async def _run() -> dict[str, Any]:
+        async def _push_direct() -> dict[str, Any]:
             name = obj.body.split("\n", 1)[0].strip("# ").strip() or obj.id
             obj_res = await notion_mod_direct.push_objective(
                 mcs_id=obj.id,
@@ -569,7 +569,7 @@ def push_cmd(
             return {"objective": obj_res.notion_page_id, "krs": kr_out}
 
         try:
-            data = asyncio.run(_run())
+            data = asyncio.run(_push_direct())
         except (NotionError, NotionConfigError) as e:
             console.print(f"[red]✗[/red] {e}")
             raise typer.Exit(code=2) from e
