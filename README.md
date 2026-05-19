@@ -123,6 +123,17 @@ cd magic-conch-shell
 uv sync
 ```
 
+이후 실행은 `uv run mcs …` 또는 `source .venv/bin/activate` 후 `mcs …`.
+
+**(선택) 글로벌 CLI 로 깔기** — 어디서든 그냥 `mcs` 만 치고 싶다면:
+
+```bash
+uv tool install -e .       # 편집 모드 (코드 변경 즉시 반영, 권장)
+# uv tool install .        # 스냅샷 설치
+# uv tool upgrade mcs      # 의존성 갱신
+# uv tool uninstall mcs    # 제거
+```
+
 ### 2. `.env` 작성
 
 ```bash
