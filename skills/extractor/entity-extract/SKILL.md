@@ -15,7 +15,7 @@ metadata:
       - mcp_mcs_memory_show
       - mcp_mcs_memory_entity_get
       - mcp_mcs_memory_entity_create_draft
-      - mcp_mcs_memory_entity_add_backlink
+      - mcp_mcs_memory_add_entity_link
 ---
 
 # Entity Extract
@@ -78,7 +78,7 @@ metadata:
 
 1. slug 후보 = 이름을 lowercase / 공백→hyphen / 한글 보존. ASCII 외 특수문자 제거.
 2. `mcp_mcs_memory_entity_get(slug="<kind>/<slug>")` 호출.
-   - `found=True` (active 또는 draft) → 기존 엔티티 → `mcp_mcs_memory_entity_add_backlink(slug=qualified, record_path=capture_path)`. 새 draft 안 만듦.
+   - `found=True` (active 또는 draft) → 기존 엔티티 → Phase 5 에서 `add_entity_link` 로 일괄 연결.
    - `found=False` → 새 draft 후보. Phase 4 로.
 
 ### Phase 4 — Draft 박기
@@ -94,9 +94,30 @@ promoted_from: <capture rel_path>
 extra: { role / company / url / author / ... }   # kind 별로 알맞은 필드만
 ```
 
+draft 생성에 성공한 slug 도 Phase 5 에서 같이 연결.
+
 **KR.current 같은 거 절대 건들지 말 것.** (per `feedback_kr_current_owner`.)
 
-### Phase 5 — 종료 출력
+### Phase 5 — Capture ↔ Entity 연결
+
+draft 새로 만든 것 + 기존 active/draft 모두 한 번에:
+
+```
+mcp_mcs_memory_add_entity_link(
+    capture_id=<id>,
+    entity_slugs=["people/jane-smith", "companies/anthropic", ...],
+)
+```
+
+`add_entity_link` 는:
+1. capture frontmatter `entities` 필드에 추가 (dedup, idempotent).
+2. 각 entity profile 의 AUTO Back-links 섹션에 라인 추가.
+
+**왜 `entity_add_backlink` 가 아니라 `add_entity_link`?** capture-write 와 domain-classify webhook 이 병렬로 돈다. domain-classify 가 먼저 끝나면 capture 가 `signals/X.md` → `domains/Y/X.md` 로 이동하는데, 이때 `set_domain` 의 backlink rewriter 는 **frontmatter `entities` 리스트만 보고 따라온다**. `entity_add_backlink` 만 호출하면 frontmatter 가 안 채워져 → move 이후 backlink 가 `signals/X` 를 계속 가리켜 깨진다. `add_entity_link` 는 frontmatter 도 sync 해서 race-safe.
+
+이 호출이 실패하면 (`{error}` 응답) 가능한 한 진행하되 종료 출력의 `errors:` 에 명시.
+
+### Phase 6 — 종료 출력
 
 운영 계열 관측용 짧은 1~3 줄 요약:
 
@@ -116,7 +137,7 @@ webhook 자동 트리거 케이스에서는 `--deliver none` 으로 등록되므
 | `mcp_mcs_memory_show` | Phase 1 capture 본문/메타 로드 |
 | `mcp_mcs_memory_entity_get` | Phase 3 중복 체크 |
 | `mcp_mcs_memory_entity_create_draft` | Phase 4 새 초안 생성 |
-| `mcp_mcs_memory_entity_add_backlink` | Phase 3 기존 엔티티에 백링크 |
+| `mcp_mcs_memory_add_entity_link` | Phase 5 capture frontmatter + entity backlink 동시 sync |
 
 ## 종료 조건
 
