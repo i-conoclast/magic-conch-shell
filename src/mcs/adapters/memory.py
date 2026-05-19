@@ -441,6 +441,43 @@ def add_okr_link(capture_id: str, kr_ids: Iterable[str]) -> list[str]:
     return merged
 
 
+def add_entity_link(capture_id: str, entity_slugs: Iterable[str]) -> list[str]:
+    """Append entity slugs to a capture's frontmatter `entities` field and
+    wire back-links on each entity profile in one shot.
+
+    Idempotent + deduped. Resolves the capture by id every call, so it is
+    safe under the FR-C1 / FR-A3 concurrent webhook fan-out where the file
+    may be moved (signals → domains) mid-flight by a sibling extractor.
+
+    The reason this exists (vs. just `entity_add_backlink`): keeping
+    frontmatter `entities` in sync is what lets `set_domain(move=True)`'s
+    `rename_record_in_backlinks` follow auto-detected entities through a
+    domain move, and what lets `rebuild_backlinks()` (mcs reindex)
+    reconstruct the AUTO sections faithfully. add_backlink alone updates
+    only the entity profile, leaving the capture's frontmatter stale.
+    """
+    to_add = [s.strip() for s in entity_slugs if s and s.strip()]
+    if not to_add:
+        resolve_memo(capture_id)
+        return []
+
+    path = resolve_memo(capture_id)
+    post = frontmatter.load(path)
+    meta = dict(post.metadata or {})
+    existing = list(meta.get("entities") or [])
+    merged: list[str] = list(existing)
+    for slug in to_add:
+        if slug not in merged:
+            merged.append(slug)
+    meta["entities"] = merged
+    path.write_text(
+        frontmatter.dumps(frontmatter.Post(post.content or "", **meta)) + "\n",
+        encoding="utf-8",
+    )
+    _apply_entity_backlinks(path, to_add)
+    return merged
+
+
 def add_task_link(capture_id: str, task_notion_ids: Iterable[str]) -> list[str]:
     """Append Notion task page ids to a capture's frontmatter `tasks` field.
 

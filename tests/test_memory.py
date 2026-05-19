@@ -9,6 +9,7 @@ import pytest
 from mcs.adapters.memory import (
     MemoAmbiguous,
     MemoNotFound,
+    add_entity_link,
     add_okr_link,
     add_task_link,
     capture,
@@ -16,6 +17,7 @@ from mcs.adapters.memory import (
     list_captures_by_date,
     load_memo,
     resolve_memo,
+    set_domain,
     supplement_frontmatter,
     read_daily,
     upsert_daily_section,
@@ -402,6 +404,110 @@ def test_add_task_link_strips_whitespace(tmp_brain: Path) -> None:
 def test_add_task_link_missing_capture_raises(tmp_brain: Path) -> None:
     with pytest.raises(MemoNotFound):
         add_task_link("2026-99-99-nope", ["page-id"])
+
+
+# ─── add_entity_link ───────────────────────────────────────────────────
+
+def test_add_entity_link_appends_to_frontmatter(tmp_brain: Path) -> None:
+    from mcs.adapters import entity as ent
+
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    r = capture(text="met jane", domain="career", title="jane-meeting")
+    result = add_entity_link(r.path.stem, ["people/jane-smith"])
+    assert result == ["people/jane-smith"]
+    # frontmatter actually persisted
+    assert _read_meta(r.path)["entities"] == ["people/jane-smith"]
+
+
+def test_add_entity_link_idempotent(tmp_brain: Path) -> None:
+    from mcs.adapters import entity as ent
+
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+    ent.create_draft(kind="companies", name="Anthropic")
+    ent.confirm("companies/anthropic")
+
+    r = capture(text="x", domain="career", title="x")
+    add_entity_link(r.path.stem, ["people/jane-smith"])
+    result = add_entity_link(
+        r.path.stem, ["people/jane-smith", "companies/anthropic"]
+    )
+    assert result == ["people/jane-smith", "companies/anthropic"]
+    assert _read_meta(r.path)["entities"] == [
+        "people/jane-smith",
+        "companies/anthropic",
+    ]
+
+
+def test_add_entity_link_wires_backlinks_on_profiles(tmp_brain: Path) -> None:
+    from mcs.adapters import entity as ent
+
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    r = capture(text="met jane", domain="career", title="m")
+    add_entity_link(r.path.stem, ["people/jane-smith"])
+
+    profile = (tmp_brain / "entities/people/jane-smith.md").read_text(
+        encoding="utf-8"
+    )
+    auto = profile.split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split(
+        "<!-- END"
+    )[0]
+    # Capture rel path appears in the AUTO section.
+    assert "/m]]" in auto or "m]]" in auto
+
+
+def test_add_entity_link_survives_domain_move(tmp_brain: Path) -> None:
+    """Regression: entity-extract + domain-classify race.
+
+    Capture is born in signals/, add_entity_link wires frontmatter +
+    backlink, then domain-classify's set_domain(move=True) moves it
+    under domains/. The backlink on the entity profile must follow
+    via rename_record_in_backlinks (which only fires when frontmatter
+    `entities` is populated — that's the whole point of add_entity_link
+    over plain add_backlink).
+    """
+    from mcs.adapters import entity as ent
+
+    ent.create_draft(kind="people", name="Jane Smith")
+    ent.confirm("people/jane-smith")
+
+    # signal (no domain) — lands in brain/signals/
+    r = capture(text="met jane today", title="met-jane")
+    assert r.path.is_relative_to(tmp_brain / "signals")
+
+    add_entity_link(r.path.stem, ["people/jane-smith"])
+
+    # Now domain-classify decides career and moves the file.
+    result = set_domain(r.path.stem, "career", move=True)
+    assert result.moved_from is not None
+    assert result.path.is_relative_to(tmp_brain / "domains" / "career")
+
+    profile = (tmp_brain / "entities/people/jane-smith.md").read_text(
+        encoding="utf-8"
+    )
+    auto = profile.split("AUTO-GENERATED BELOW. DO NOT EDIT. -->")[1].split(
+        "<!-- END"
+    )[0]
+    # Backlink should now point at domains/career/..., not signals/...
+    assert "signals/" not in auto
+    assert "domains/career/" in auto
+
+
+def test_add_entity_link_empty_input_no_op(tmp_brain: Path) -> None:
+    r = capture(text="x", domain="career")
+    assert add_entity_link(r.path.stem, []) == []
+    assert add_entity_link(r.path.stem, ["", "  "]) == []
+    # entities field wasn't touched (capture set it to [])
+    assert _read_meta(r.path)["entities"] == []
+
+
+def test_add_entity_link_missing_capture_raises(tmp_brain: Path) -> None:
+    with pytest.raises(MemoNotFound):
+        add_entity_link("2026-99-99-nope", ["people/jane"])
 
 
 # ─── daily_file_path / upsert_daily_section ────────────────────────────

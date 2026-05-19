@@ -22,6 +22,7 @@ from mcs.adapters.memory import (
     DOMAINS,
     MemoAmbiguous,
     MemoNotFound,
+    add_entity_link as core_add_entity_link,
     add_okr_link as core_add_okr_link,
     add_task_link as core_add_task_link,
     capture as core_capture,
@@ -892,6 +893,29 @@ async def memory_entity_get(slug: str) -> dict[str, Any]:
         **_entity_ref_dict(ref),
         "body": body,
     }
+
+
+@mcp.tool(
+    name="memory.add_entity_link",
+    description=(
+        "Append entity slugs to a capture's frontmatter `entities` field "
+        "AND wire back-links on each entity profile in one call. "
+        "Idempotent + deduped, capture_id-based (safe when the file may "
+        "be moved between signals/ and domains/ by a sibling webhook). "
+        "Preferred over `entity_add_backlink` for capture-side extractors "
+        "like entity-extract — keeping frontmatter `entities` in sync is "
+        "what lets domain moves and reindex preserve the back-links. "
+        "Returns the resulting full entities list or {error}."
+    ),
+)
+async def memory_add_entity_link(
+    capture_id: str, entity_slugs: list[str]
+) -> dict[str, Any]:
+    try:
+        merged = core_add_entity_link(capture_id, entity_slugs)
+    except (MemoNotFound, MemoAmbiguous) as e:
+        return {"error": str(e)}
+    return {"entities": merged}
 
 
 @mcp.tool(
