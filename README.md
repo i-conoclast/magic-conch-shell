@@ -5,7 +5,8 @@
 당신의 라이프·커리어 맥락을 스스로 축적하는 개인 메모리 + 에이전트 시스템.
 가벼운 질문엔 소라고둥처럼, 진지한 질문엔 선택지와 근거로 답한다.
 
-<!-- TODO: demo.gif — capture → KR auto-increment → okr show 5초 데모 -->
+<img src="mcs-help.png" width="720" alt="mcs --help — 명령군 한눈에">
+<!-- TODO 스크린샷: mcs --help 출력 — repo 루트의 mcs-help.png -->
 
 ---
 
@@ -37,9 +38,6 @@ mcs capture "anthropic 1차 라운드 정리" -d career -e people/jane-smith
 mcs search "면접" -d career --json
 ```
 
-<img src="docs/images/readme/search-result.png" width="720" alt="mcs search 결과 — 하이브리드 검색 + 엔티티 후처리">
-<!-- TODO 스크린샷: mcs search 컬러판 결과 화면 -->
-
 ### 🎯 OKR & 동적 KR 에이전트
 `mcs okr new` 가 Hermes okr-intake 스킬로 대화형 인테이크를 돌리고,
 저장된 각 KR 마다 `skills/objectives/<kr-id>/SKILL.md` 를 자동 생성한다.
@@ -50,9 +48,6 @@ mcs okr new "커리어 OKR 하나 세우자"
 mcs capture "mock interview 2회" --kr 2026-Q2-career-mle-role.kr-2 --increment 2
 mcs okr show 2026-Q2-career-mle-role
 ```
-
-<img src="docs/images/readme/okr-show.png" width="720" alt="mcs okr show — KR 진척률 테이블">
-<!-- TODO 스크린샷: mcs okr show 의 Rich 테이블 + KR 진척률 -->
 
 ### 📥 Inbox & 승격 (FR-G3)
 엔티티 후보 / 스킬 후보 / 캡처 분류 등 "사람 판단 필요" 항목이 generic inbox 로 모인다.
@@ -191,9 +186,6 @@ hermes gateway run           # :8642  (Hermes API)
 mcs doctor
 mcs capture "hello shell"
 ```
-
-<img src="docs/images/readme/doctor-pass.png" width="720" alt="mcs doctor — 환경 헬스체크 전부 통과">
-<!-- TODO 스크린샷: mcs doctor 가 ✓ 로 통과한 화면 -->
 
 ---
 
